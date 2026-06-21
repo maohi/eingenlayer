@@ -1,0 +1,470 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © NPR21
+// VervoortCrossover Zero-Lag [NPR21] — STRATEGY EDITION
+// Based on Sylvain Vervoort's original ThinkScript crossover concept (2009)
+// Converted from the v1.10.1 indicator into a backtestable Pine Script v6 strategy
+// Date: June 21, 2026
+
+//@version=6
+strategy("VervoortCrossover Zero-Lag [NPR21] — Strategy",
+     shorttitle      = "Vervoort ZL Strat [NPR21] v1.0",
+     overlay         = true,
+     max_labels_count= 500,
+     max_lines_count = 500,
+     pyramiding      = 0,
+     calc_on_every_tick      = false,
+     process_orders_on_close = true,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value= 100,
+     initial_capital  = 10000,
+     currency         = currency.USD,
+     commission_type  = strategy.commission.percent,
+     commission_value = 0.04,
+     slippage         = 1)
+
+// ============================================================================
+// === INPUTS =================================================================
+// ============================================================================
+
+grpCore     = "Core Settings"
+grpTrade    = "Strategy / Trade Management"
+grpFilter   = "Directional Filter"
+grpAnti     = "Anti-Chop Filters (M10)"
+grpPDHL     = "Previous Day High / Low"
+grpVisual   = "Visual Settings"
+grpMarker   = "Signal Markers (Dots/Arrows)"
+grpCallout  = "BUY / SELL Callouts"
+grpFill     = "Momentum Fill"
+
+// --- Period preset ---
+presetChoice = input.string("M10 (28)", "Period Preset",
+     options  = ["Scalp (21)", "M10 (28)", "Vervoort (34)", "Swing (55)", "Day Trade (100)", "Custom"],
+     group    = grpCore,
+     tooltip  = "Scalp = faster signals on lower timeframes\nM10 = défaut optimisé 10 minutes\nVervoort = Sylvain Vervoort's published 34-period setting\nSwing = slower signals for higher timeframes\nDay Trade = 100 périodes\nCustom = use the manual period below")
+
+customPeriod = input.int(34, "Custom Period", minval = 2, maxval = 500, group = grpCore,
+     tooltip = "Only used when Preset = Custom")
+
+int period = switch presetChoice
+    "Scalp (21)"      => 21
+    "M10 (28)"        => 28
+    "Vervoort (34)"   => 34
+    "Swing (55)"      => 55
+    "Day Trade (100)" => 100
+    => customPeriod
+
+// --- Timezone ---
+tzInput = input.string("Pacific/Tahiti", "Fuseau horaire (session & timestamps)", group = grpCore,
+     tooltip = "Fuseau IANA appliqué au filtre de session et aux timestamps des callouts.\nDéfaut : Pacific/Tahiti (UTC-10, Papeete).")
+
+// --- Profil de signal ---
+signalProfile = input.string("Custom (réglages manuels)", "Profil de signal",
+     options = ["Custom (réglages manuels)", "Raw / Scalp instantané"],
+     group   = grpCore,
+     tooltip = "Custom = chaque filtre est piloté par son propre toggle.\nRaw / Scalp instantané = capte CHAQUE croisement, sans filtre. Surcharge : EMA200 OFF, Filtre de pente OFF, Cooldown 0, Session OFF.")
+
+// --- Heikin-Ashi formula ---
+useOriginalHA = input.bool(true, "Heikin-Ashi : formule Vervoort originale", group = grpCore,
+     tooltip = "ON = haOpen = (haOpen[1] + haClose[1]) / 2, la formule publiée par Vervoort (2009).\nOFF = approximation ohlc4[1].")
+
+// ----------------------------------------------------------------------------
+// --- STRATEGY / TRADE MANAGEMENT --------------------------------------------
+// ----------------------------------------------------------------------------
+
+tradeDirection = input.string("Long & Short", "Direction des trades",
+     options = ["Long & Short", "Long uniquement", "Short uniquement"],
+     group   = grpTrade,
+     tooltip = "Long & Short = la stratégie peut être longue OU short (reverse au croisement opposé).\nLong uniquement / Short uniquement = un seul côté autorisé ; le signal opposé sert alors uniquement de sortie.")
+
+closeOnOpposite = input.bool(true, "Clôturer sur signal opposé", group = grpTrade,
+     tooltip = "ON = un signal contraire ferme la position en cours (et, en mode Long & Short, ouvre la position inverse).\nOFF = la position n'est fermée que par le SL / TP / trailing.")
+
+// --- Stop Loss ---
+useSL = input.bool(true, "Activer Stop Loss", group = grpTrade)
+slType = input.string("ATR", "Type de Stop Loss", options = ["ATR", "Pourcentage"], group = grpTrade)
+slAtrMult = input.float(2.0, "Stop Loss (× ATR)", minval = 0.1, maxval = 20.0, step = 0.1, group = grpTrade,
+     tooltip = "Distance du stop sous/au-dessus du prix d'entrée, en multiples d'ATR(14).")
+slPct = input.float(1.0, "Stop Loss (%)", minval = 0.05, maxval = 50.0, step = 0.05, group = grpTrade)
+
+// --- Take Profit ---
+useTP = input.bool(true, "Activer Take Profit", group = grpTrade)
+tpType = input.string("ATR", "Type de Take Profit", options = ["ATR", "Pourcentage", "R multiple"], group = grpTrade,
+     tooltip = "ATR = distance en multiples d'ATR.\nPourcentage = distance en %.\nR multiple = multiple de la distance du Stop Loss (ratio risque/rendement).")
+tpAtrMult = input.float(4.0, "Take Profit (× ATR)", minval = 0.1, maxval = 40.0, step = 0.1, group = grpTrade)
+tpPct = input.float(2.0, "Take Profit (%)", minval = 0.05, maxval = 100.0, step = 0.05, group = grpTrade)
+tpR = input.float(2.0, "Take Profit (R multiple)", minval = 0.1, maxval = 20.0, step = 0.1, group = grpTrade)
+
+// --- Trailing Stop ---
+useTrail = input.bool(false, "Activer Trailing Stop (ATR)", group = grpTrade,
+     tooltip = "Trailing stop basé sur l'ATR. Se déclenche après activation et suit le prix.")
+trailAtrMult = input.float(2.5, "Trailing Stop (× ATR)", minval = 0.1, maxval = 20.0, step = 0.1, group = grpTrade)
+trailActAtrMult = input.float(1.0, "Activation du trailing (× ATR de profit)", minval = 0.0, maxval = 20.0, step = 0.1, group = grpTrade,
+     tooltip = "Profit minimal (en ATR) avant que le trailing stop ne commence à suivre.")
+
+// --- Date range filter ---
+useDateFilter = input.bool(false, "Limiter le backtest à une plage de dates", group = grpTrade)
+startDate = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Date de début", group = grpTrade)
+endDate   = input.time(timestamp("01 Jan 2027 00:00 +0000"), "Date de fin",   group = grpTrade)
+
+// --- Directional filter ---
+useTrendFilter = input.bool(true, "Enable EMA200 Directional Filter", group = grpFilter,
+     tooltip = "BUY uniquement au-dessus de l'EMA200, SELL uniquement en dessous.\nNB : forcé OFF en profil Raw / Scalp instantané.")
+trendLen = input.int(200, "Trend EMA Length", minval = 20, maxval = 500, group = grpFilter)
+showTrendEMA = input.bool(false, "Plot Trend EMA", group = grpFilter)
+
+// --- Anti-chop ---
+useSlopeFilter = input.bool(true, "Filtre de pente (Typical ZL)", group = grpAnti,
+     tooltip = "Le BUY exige une pente positive minimale de la ligne Typical, le SELL une pente négative.\nNB : forcé OFF en profil Raw / Scalp instantané.")
+slopeLen = input.int(3, "Lookback pente (barres)", minval = 1, maxval = 10, group = grpAnti)
+minSlopeATR = input.float(0.10, "Pente minimale (× ATR)", minval = 0.0, maxval = 2.0, step = 0.05, group = grpAnti)
+cooldownBars = input.int(4, "Cooldown entre signaux (barres)", minval = 0, maxval = 50, group = grpAnti,
+     tooltip = "Nombre minimum de barres entre deux signaux. NB : forcé à 0 en profil Raw.")
+useSession = input.bool(false, "Filtre de session", group = grpAnti,
+     tooltip = "Limiter les signaux aux heures liquides. Intraday uniquement.")
+sessionStr = input.session("0700-1600", "Session (heure locale Tahiti)", group = grpAnti)
+
+// --- Previous Day High / Low ---
+showPDHL = input.bool(true, "Afficher PDH / PDL", group = grpPDHL)
+pdhCol = input.color(color.new(#2962FF, 0), "Couleur PDH", group = grpPDHL)
+pdlCol = input.color(color.new(#FF6D00, 0), "Couleur PDL", group = grpPDHL)
+pdLineStyleChoice = input.string("Dashed", "Style de ligne", options = ["Solid", "Dashed", "Dotted"], group = grpPDHL)
+pdLineWidth = input.int(1, "Épaisseur de ligne", minval = 1, maxval = 4, group = grpPDHL)
+showPDLabels = input.bool(true, "Labels PDH / PDL avec prix", group = grpPDHL)
+
+// --- Visual ---
+showTypical = input.bool(true, "Show Typical Price Zero-Lag TEMA (green line)", group = grpVisual)
+showHA      = input.bool(true, "Show Heikin-Ashi Zero-Lag TEMA (red line)",     group = grpVisual)
+typicalCol  = input.color(color.new(#26a69a, 0), "Typical Line Color", group = grpVisual)
+haCol       = input.color(color.new(#ef5350, 0), "Heikin-Ashi Line Color", group = grpVisual)
+lineWidth   = input.int(2, "Line Width", minval = 1, maxval = 5, group = grpVisual)
+
+// --- Signal markers ---
+showMarkers = input.bool(true, "Show Signal Markers", group = grpMarker)
+markerStyle = input.string("Dot at Cross", "Marker Style",
+     options = ["None", "Triangle Arrow", "Dot Above/Below", "Dot at Cross"], group = grpMarker)
+markerSizeChoice = input.string("Tiny", "Marker Size",
+     options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = grpMarker)
+buyMarkerCol  = input.color(color.new(#00FF00, 0), "Buy Marker Color",  group = grpMarker)
+sellMarkerCol = input.color(color.new(#FF0000, 0), "Sell Marker Color", group = grpMarker)
+
+// --- Callout Labels ---
+showCallouts        = input.bool(true, "Show BUY / SELL Callout Labels", group = grpCallout)
+calloutPushAtr      = input.float(1.5, "Label Pushaway (ATR x)", minval = 0.5, maxval = 6.0, step = 0.25, group = grpCallout)
+showConnector       = input.bool(true, "Show Connector Line (triangle tip to dot)", group = grpCallout)
+connectorWidth      = input.int(1, "Connector Line Width", minval = 1, maxval = 5, group = grpCallout)
+buyText             = input.string("BUY",  "Buy Label Text",  group = grpCallout)
+sellText            = input.string("SELL", "Sell Label Text", group = grpCallout)
+showPriceOnLabel    = input.bool(true,  "Show Price on Label",       group = grpCallout)
+showTimestamp       = input.bool(false, "Show Timestamp on Label",   group = grpCallout)
+showTriangleOnLabel = input.bool(true,  "Show Directional Triangle", group = grpCallout)
+calloutSize         = input.string("Small", "Label Size",
+     options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = grpCallout)
+buyCalloutCol       = input.color(color.new(#00FF00, 0), "Buy Callout Background",  group = grpCallout)
+sellCalloutCol      = input.color(color.new(#FF0000, 0), "Sell Callout Background", group = grpCallout)
+buyTextCol          = input.color(color.black, "Buy Text Color",  group = grpCallout)
+sellTextCol         = input.color(color.white, "Sell Text Color", group = grpCallout)
+
+// --- Momentum Fill ---
+showFill    = input.bool(true, "Show Momentum Fill Between Lines", group = grpFill)
+fillOpacity = input.int(85, "Fill Transparency (0=solid, 100=invisible)", minval = 50, maxval = 95, group = grpFill)
+
+// ============================================================================
+// === PROFIL DE SIGNAL — VARIABLES EFFECTIVES ================================
+// ============================================================================
+
+bool rawMode      = signalProfile == "Raw / Scalp instantané"
+bool effUseTrend  = rawMode ? false : useTrendFilter
+bool effUseSlope  = rawMode ? false : useSlopeFilter
+bool effUseSession= rawMode ? false : useSession
+int  effCooldown  = rawMode ? 0     : cooldownBars
+
+// ============================================================================
+// === ZERO-LAG TEMA FUNCTION =================================================
+// ============================================================================
+
+zeroLagTEMA(series float src, simple int len) =>
+    e1   = ta.ema(src, len)
+    e2   = ta.ema(e1,  len)
+    e3   = ta.ema(e2,  len)
+    tma1 = 3.0 * e1 - 3.0 * e2 + e3
+
+    e4   = ta.ema(tma1, len)
+    e5   = ta.ema(e4,   len)
+    e6   = ta.ema(e5,   len)
+    tma2 = 3.0 * e4 - 3.0 * e5 + e6
+
+    tma1 + (tma1 - tma2)
+
+// ============================================================================
+// === CALCULATIONS ===========================================================
+// ============================================================================
+
+zlTypical = zeroLagTEMA(hlc3, period)
+
+// Vervoort's modified Heikin-Ashi close (récursif, non-repainting)
+var float haOpen  = na
+var float haClose = na
+float haPrevBase = useOriginalHA ? haClose[1] : ohlc4[1]
+haOpen  := na(haOpen[1]) ? (open + close) / 2.0 : (haPrevBase + haOpen[1]) / 2.0
+haClose := (ohlc4 + haOpen + math.max(high, haOpen) + math.min(low, haOpen)) / 4.0
+zlHA     = zeroLagTEMA(haClose, period)
+
+atr14 = ta.atr(14)
+float atrSafe = nz(atr14, high - low)
+
+// --- Directional filter ---
+trendEMA = ta.ema(close, trendLen)
+longOK   = not effUseTrend or close > trendEMA
+shortOK  = not effUseTrend or close < trendEMA
+
+// --- Filtre de pente ---
+float slopeATR  = atrSafe > 0 ? (zlTypical - zlTypical[slopeLen]) / atrSafe : 0.0
+bool  slopeBuyOK  = not effUseSlope or slopeATR >=  minSlopeATR
+bool  slopeSellOK = not effUseSlope or slopeATR <= -minSlopeATR
+
+// --- Filtre de session ---
+bool inSession = not effUseSession or not na(time(timeframe.period, sessionStr, tzInput))
+
+// --- Cooldown anti-rafale ---
+var int lastSignalBar = na
+bool cooldownOK = effCooldown == 0 or na(lastSignalBar) or (bar_index - lastSignalBar) >= effCooldown
+
+// --- Date filter ---
+bool inDateRange = not useDateFilter or (time >= startDate and time <= endDate)
+
+rawBuy  = ta.crossover (zlTypical, zlHA)
+rawSell = ta.crossunder(zlTypical, zlHA)
+
+buySignal  = rawBuy  and longOK  and slopeBuyOK  and inSession and cooldownOK and inDateRange
+sellSignal = rawSell and shortOK and slopeSellOK and inSession and cooldownOK and inDateRange
+
+if buySignal or sellSignal
+    lastSignalBar := bar_index
+
+plot(showTrendEMA ? trendEMA : na, "Trend EMA", color = color.new(color.orange, 0), linewidth = 1)
+
+// ============================================================================
+// === PRICE FORMATTING HELPER ================================================
+// ============================================================================
+
+formatPrice(float value) =>
+    "$" + str.tostring(value, format.mintick)
+
+// ============================================================================
+// === STRATEGY EXECUTION =====================================================
+// ============================================================================
+// Entrées sur croisement Zero-Lag, sorties par signal opposé et/ou SL/TP/trail.
+
+bool allowLong  = tradeDirection != "Short uniquement"
+bool allowShort = tradeDirection != "Long uniquement"
+
+// --- Entrées ---
+if buySignal
+    if allowLong
+        strategy.entry("Long", strategy.long)
+    else if closeOnOpposite
+        strategy.close("Short", comment = "Exit Short (signal)")
+
+if sellSignal
+    if allowShort
+        strategy.entry("Short", strategy.short)
+    else if closeOnOpposite
+        strategy.close("Long", comment = "Exit Long (signal)")
+
+// En mode Long & Short, strategy.entry inverse automatiquement la position
+// (pyramiding = 0). Si closeOnOpposite = OFF, on évite la sortie sur signal
+// opposé en bloquant l'entrée inverse tant qu'une position est ouverte.
+if not closeOnOpposite
+    if buySignal and strategy.position_size < 0
+        strategy.cancel("Long")
+    if sellSignal and strategy.position_size > 0
+        strategy.cancel("Short")
+
+// --- Niveaux de sortie (SL / TP / Trailing) ---
+// Calculés sur le prix d'entrée moyen de la position en cours.
+float entryPrice = strategy.position_avg_price
+
+// Distance du stop en prix
+float slDist = slType == "ATR" ? slAtrMult * atrSafe : entryPrice * slPct / 100.0
+
+// Distance du take profit en prix
+float tpDist = switch tpType
+    "ATR"        => tpAtrMult * atrSafe
+    "Pourcentage"=> entryPrice * tpPct / 100.0
+    "R multiple" => slDist * tpR
+    => tpAtrMult * atrSafe
+
+// Trailing en prix
+float trailDist   = trailAtrMult * atrSafe
+float trailOffset = trailActAtrMult * atrSafe
+
+if strategy.position_size > 0
+    float slPrice = useSL ? entryPrice - slDist : na
+    float tpPrice = useTP ? entryPrice + tpDist : na
+    if useTrail
+        strategy.exit("Exit Long", from_entry = "Long",
+             stop = slPrice, limit = tpPrice,
+             trail_price = entryPrice + trailOffset, trail_offset = trailDist / syminfo.mintick)
+    else if useSL or useTP
+        strategy.exit("Exit Long", from_entry = "Long", stop = slPrice, limit = tpPrice)
+
+if strategy.position_size < 0
+    float slPrice = useSL ? entryPrice + slDist : na
+    float tpPrice = useTP ? entryPrice - tpDist : na
+    if useTrail
+        strategy.exit("Exit Short", from_entry = "Short",
+             stop = slPrice, limit = tpPrice,
+             trail_price = entryPrice - trailOffset, trail_offset = trailDist / syminfo.mintick)
+    else if useSL or useTP
+        strategy.exit("Exit Short", from_entry = "Short", stop = slPrice, limit = tpPrice)
+
+// ============================================================================
+// === PLOTS ==================================================================
+// ============================================================================
+
+pTypical = plot(showTypical ? zlTypical : na, "Typical Zero-Lag TEMA", color = typicalCol, linewidth = lineWidth)
+pHA      = plot(showHA ? zlHA : na, "Heikin-Ashi Zero-Lag TEMA", color = haCol, linewidth = lineWidth)
+
+var color fillUpCol = color.new(typicalCol, fillOpacity)
+var color fillDnCol = color.new(haCol,      fillOpacity)
+fillColor = zlTypical >= zlHA ? fillUpCol : fillDnCol
+fill(pTypical, pHA, color = showFill ? fillColor : na, title = "Momentum Fill")
+
+// ============================================================================
+// === PREVIOUS DAY HIGH / LOW ================================================
+// ============================================================================
+
+[pdHigh, pdLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+var string pdStyleValue = switch pdLineStyleChoice
+    "Solid"  => line.style_solid
+    "Dashed" => line.style_dashed
+    "Dotted" => line.style_dotted
+    => line.style_dashed
+
+var line  pdhLine  = na
+var line  pdlLine  = na
+var label pdhLabel = na
+var label pdlLabel = na
+
+bool pdActive = showPDHL and timeframe.isintraday
+
+if pdActive and timeframe.change("D") and not na(pdHigh)
+    pdhLine := line.new(bar_index, pdHigh, bar_index, pdHigh,
+         xloc = xloc.bar_index, color = pdhCol, width = pdLineWidth, style = pdStyleValue)
+    pdlLine := line.new(bar_index, pdLow, bar_index, pdLow,
+         xloc = xloc.bar_index, color = pdlCol, width = pdLineWidth, style = pdStyleValue)
+    if showPDLabels
+        label.delete(pdhLabel)
+        label.delete(pdlLabel)
+        pdhLabel := label.new(bar_index, pdHigh, "PDH " + formatPrice(pdHigh),
+             style = label.style_label_left, yloc = yloc.price,
+             color = color.new(pdhCol, 80), textcolor = pdhCol, size = size.small)
+        pdlLabel := label.new(bar_index, pdLow, "PDL " + formatPrice(pdLow),
+             style = label.style_label_left, yloc = yloc.price,
+             color = color.new(pdlCol, 80), textcolor = pdlCol, size = size.small)
+
+if pdActive and not na(pdhLine)
+    line.set_x2(pdhLine, bar_index)
+    line.set_x2(pdlLine, bar_index)
+    if showPDLabels and not na(pdhLabel)
+        label.set_x(pdhLabel, bar_index)
+        label.set_x(pdlLabel, bar_index)
+
+// ============================================================================
+// === SIGNAL MARKERS (label-based) ===========================================
+// ============================================================================
+
+var string markerSizeValue = switch markerSizeChoice
+    "Tiny"   => size.tiny
+    "Small"  => size.small
+    "Normal" => size.normal
+    "Large"  => size.large
+    "Huge"   => size.huge
+    => size.tiny
+
+if showMarkers and markerStyle != "None" and (buySignal or sellSignal)
+    bool  isBuy = buySignal
+    color mCol  = isBuy ? buyMarkerCol : sellMarkerCol
+    if markerStyle == "Triangle Arrow"
+        label.new(bar_index, na,
+             style = isBuy ? label.style_triangleup : label.style_triangledown,
+             color = mCol, size = markerSizeValue,
+             yloc  = isBuy ? yloc.belowbar : yloc.abovebar)
+    else if markerStyle == "Dot Above/Below"
+        label.new(bar_index, na,
+             style = label.style_circle,
+             color = mCol, size = markerSizeValue,
+             yloc  = isBuy ? yloc.belowbar : yloc.abovebar)
+    else if markerStyle == "Dot at Cross"
+        label.new(bar_index, zlTypical,
+             style = label.style_circle,
+             color = mCol, size = markerSizeValue,
+             yloc  = yloc.price)
+
+// ============================================================================
+// === CALLOUT LABELS =========================================================
+// ============================================================================
+
+var string calloutSizeValue = switch calloutSize
+    "Tiny"   => size.tiny
+    "Small"  => size.small
+    "Normal" => size.normal
+    "Large"  => size.large
+    "Huge"   => size.huge
+    => size.small
+
+if showCallouts and buySignal
+    string txt = ""
+    if showTriangleOnLabel
+        txt := txt + "▲ "
+    txt := txt + buyText
+    if showPriceOnLabel
+        txt := txt + "\n" + formatPrice(zlTypical)
+    if showTimestamp
+        txt := txt + "\n" + str.format_time(time_close, "HH:mm", tzInput)
+
+    float anchorY = low - (atrSafe * calloutPushAtr)
+    label.new(bar_index, anchorY, text = txt,
+         style    = label.style_label_up,
+         color    = buyCalloutCol, textcolor = buyTextCol,
+         size     = calloutSizeValue, yloc = yloc.price, xloc = xloc.bar_index)
+    if showConnector
+        line.new(bar_index, anchorY, bar_index, zlTypical,
+             xloc = xloc.bar_index, color = buyCalloutCol, width = connectorWidth)
+
+if showCallouts and sellSignal
+    string txt = ""
+    if showTriangleOnLabel
+        txt := txt + "▼ "
+    txt := txt + sellText
+    if showPriceOnLabel
+        txt := txt + "\n" + formatPrice(zlTypical)
+    if showTimestamp
+        txt := txt + "\n" + str.format_time(time_close, "HH:mm", tzInput)
+
+    float anchorY = high + (atrSafe * calloutPushAtr)
+    label.new(bar_index, anchorY, text = txt,
+         style    = label.style_label_down,
+         color    = sellCalloutCol, textcolor = sellTextCol,
+         size     = calloutSizeValue, yloc = yloc.price, xloc = xloc.bar_index)
+    if showConnector
+        line.new(bar_index, anchorY, bar_index, zlTypical,
+             xloc = xloc.bar_index, color = sellCalloutCol, width = connectorWidth)
+
+// ============================================================================
+// === ALERTS =================================================================
+// ============================================================================
+// La stratégie expose ses ordres via les alertes natives strategy.* ;
+// on conserve aussi des alertcondition() sur les signaux bruts.
+
+alertcondition(buySignal,  title = "Vervoort ZL Strat - Buy Signal",
+     message = "Vervoort Zero-Lag Crossover BUY on {{ticker}} {{interval}}")
+alertcondition(sellSignal, title = "Vervoort ZL Strat - Sell Signal",
+     message = "Vervoort Zero-Lag Crossover SELL on {{ticker}} {{interval}}")
+alertcondition(buySignal or sellSignal, title = "Vervoort ZL Strat - Any Signal",
+     message = "Vervoort Zero-Lag Crossover signal on {{ticker}} {{interval}}")
+
+// ============================================================================
+// === END OF SCRIPT ==========================================================
+// ============================================================================
