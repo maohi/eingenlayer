@@ -3,6 +3,11 @@
 Script de stratégie **Pine Script v5** pour TradingView :
 [`sma8_20_crossover_price_action.pine`](./sma8_20_crossover_price_action.pine)
 
+Une **version indicateur** (sans passage d'ordres, avec couleurs des SMA
+paramétrables et box LONG/SHORT affichées au point précis du signal) est
+disponible ici :
+[`../indicators/sma8_20_crossover_price_action_indicator.pine`](../indicators/sma8_20_crossover_price_action_indicator.pine)
+
 ## Principe
 
 La stratégie combine un signal de tendance (croisement de moyennes mobiles)

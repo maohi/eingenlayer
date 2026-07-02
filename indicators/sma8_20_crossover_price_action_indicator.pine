@@ -1,0 +1,167 @@
+//@version=5
+// =============================================================================
+//  Indicateur : Croisement SMA 8/20 + Confirmation Price Action
+//  Version INDICATEUR de la stratégie éponyme (voir /strategies) :
+//  même logique de signal, sans passage d'ordres.
+//
+//    1. SETUP  : croisement SMA 8 / SMA 20 (crossover = long, crossunder = short)
+//    2. CONFIRMATION : bougie de conviction (style Oliver Velez) qui
+//         - a un corps plein significatif (clôture proche de son extrême),
+//         - clôture entièrement du bon côté de la SMA 8,
+//         - casse le plus haut (long) / plus bas (short) de la bougie de croisement.
+//    3. SIGNAL : une box "LONG" / "SHORT" est affichée au point précis du
+//       signal (ancrée sous le plus bas / au-dessus du plus haut de la bougie
+//       de confirmation), avec en infobulle les niveaux d'entrée, SL et TP.
+// =============================================================================
+indicator("SMA 8/20 + Confirmation Price Action (Velez / EllyDtrade) — Indicateur",
+     shorttitle="SMA 8/20 PA",
+     overlay=true,
+     max_labels_count=500)
+
+// =============================================================================
+// 1. INPUTS
+// =============================================================================
+grpMa   = "Moyennes mobiles"
+grpConf = "Bougie de confirmation (Velez / EllyDtrade)"
+grpRisk = "Niveaux (infobulle des signaux)"
+grpDisp = "Affichage des signaux"
+
+fastLen   = input.int(8,  "SMA Rapide", minval=1, group=grpMa)
+fastColor = input.color(color.orange, "Couleur SMA Rapide", group=grpMa)
+fastWidth = input.int(2, "Épaisseur SMA Rapide", minval=1, maxval=5, group=grpMa)
+slowLen   = input.int(20, "SMA Lente", minval=2, group=grpMa)
+slowColor = input.color(#2962FF, "Couleur SMA Lente", group=grpMa)
+slowWidth = input.int(2, "Épaisseur SMA Lente", minval=1, maxval=5, group=grpMa)
+
+maxConfBars  = input.int(5, "Fenêtre de confirmation (bougies)", minval=1, maxval=20, group=grpConf, tooltip="Nombre maximum de bougies après le croisement pour obtenir une confirmation. Passé ce délai, le setup est annulé.")
+minBodyRatio = input.float(0.55, "Corps minimum (corps / range)", minval=0.1, maxval=1.0, step=0.05, group=grpConf, tooltip="Part minimale du corps dans le range total de la bougie. 0.55 = bougie de conviction avec peu de mèches.")
+minClosePos  = input.float(0.70, "Clôture proche de l'extrême (0-1)", minval=0.5, maxval=1.0, step=0.05, group=grpConf, tooltip="Pour un LONG : (close - low) / (high - low). 0.70 = clôture dans les 30% supérieurs de la bougie (momentum style Velez). Symétrique pour un SHORT.")
+useElephant  = input.bool(true, "Filtre 'Elephant Bar' (Velez)", group=grpConf, tooltip="Exige que le corps de la bougie de confirmation soit nettement plus grand que le corps moyen récent.")
+elephantMult = input.float(1.3, "Taille mini vs corps moyen (x)", minval=1.0, step=0.1, group=grpConf)
+elephantLen  = input.int(20, "Période du corps moyen", minval=5, group=grpConf)
+smaSideMode  = input.string("Corps entier", "Position exigée vs SMA 8", options=["Corps entier", "Bougie entière"], group=grpConf, tooltip="'Corps entier' : open ET close au-dessus (long) / en dessous (short) de la SMA 8. 'Bougie entière' : mèches comprises (plus strict).")
+breakMode    = input.string("Clôture", "Cassure de la bougie de croisement", options=["Clôture", "Mèche"], group=grpConf, tooltip="'Clôture' : la bougie de confirmation doit CLÔTURER au-delà de l'extrême de la bougie de croisement (plus fiable). 'Mèche' : une cassure intrabar suffit.")
+
+slMode        = input.string("Bougie", "Type de Stop Loss", options=["Bougie", "SMA 20"], group=grpRisk)
+slBufferTicks = input.int(2, "Buffer du SL (ticks)", minval=0, group=grpRisk)
+rr1           = input.float(1.5, "Risk/Reward TP1", minval=0.1, step=0.1, group=grpRisk)
+rr2           = input.float(2.0, "Risk/Reward TP2", minval=0.1, step=0.1, group=grpRisk)
+
+showLong       = input.bool(true, "Afficher les signaux LONG", group=grpDisp)
+showShort      = input.bool(true, "Afficher les signaux SHORT", group=grpDisp)
+longBoxColor   = input.color(color.new(color.green, 0), "Fond box LONG",  group=grpDisp, inline="long")
+longTxtColor   = input.color(color.white, "Texte LONG", group=grpDisp, inline="long")
+shortBoxColor  = input.color(color.new(color.red, 0), "Fond box SHORT", group=grpDisp, inline="short")
+shortTxtColor  = input.color(color.white, "Texte SHORT", group=grpDisp, inline="short")
+labelSizeOpt   = input.string("Petit", "Taille des box", options=["Minuscule", "Petit", "Normal", "Grand"], group=grpDisp)
+showLevels     = input.bool(true, "Infobulle avec Entrée / SL / TP1 / TP2", group=grpDisp)
+showCross      = input.bool(true, "Marquer les croisements SMA (setup)", group=grpDisp)
+showSetupBg    = input.bool(true, "Fond coloré pendant l'attente de confirmation", group=grpDisp)
+
+labelSize = labelSizeOpt == "Minuscule" ? size.tiny : labelSizeOpt == "Petit" ? size.small : labelSizeOpt == "Normal" ? size.normal : size.large
+
+// =============================================================================
+// 2. INDICATEURS & ANATOMIE DE LA BOUGIE
+// =============================================================================
+smaFast = ta.sma(close, fastLen)
+smaSlow = ta.sma(close, slowLen)
+
+crossUp = ta.crossover(smaFast, smaSlow)
+crossDn = ta.crossunder(smaFast, smaSlow)
+
+body       = math.abs(close - open)
+rng        = high - low
+bodyRatio  = rng > 0 ? body / rng : 0.0
+closePosUp = rng > 0 ? (close - low) / rng : 0.0   // 1 = clôture au plus haut
+closePosDn = rng > 0 ? (high - close) / rng : 0.0  // 1 = clôture au plus bas
+avgBody    = ta.sma(body, elephantLen)
+elephantOk = not useElephant or (avgBody > 0 and body >= elephantMult * avgBody)
+
+// =============================================================================
+// 3. MACHINE À ÉTATS DU SETUP
+// =============================================================================
+var bool  longSetup     = false
+var float longTrigHigh  = na
+var int   longSetupBar  = na
+var bool  shortSetup    = false
+var float shortTrigLow  = na
+var int   shortSetupBar = na
+
+if crossUp
+    longSetup     := true
+    longTrigHigh  := high
+    longSetupBar  := bar_index
+    shortSetup    := false
+if crossDn
+    shortSetup    := true
+    shortTrigLow  := low
+    shortSetupBar := bar_index
+    longSetup     := false
+
+// Expiration de la fenêtre de confirmation
+if longSetup and bar_index - longSetupBar > maxConfBars
+    longSetup := false
+if shortSetup and bar_index - shortSetupBar > maxConfBars
+    shortSetup := false
+
+// =============================================================================
+// 4. BOUGIE DE CONFIRMATION → SIGNAL
+// =============================================================================
+bullBodyOk  = close > open and bodyRatio >= minBodyRatio and closePosUp >= minClosePos and elephantOk
+aboveSma8   = smaSideMode == "Corps entier" ? math.min(open, close) > smaFast : low > smaFast
+longBreakOk = breakMode == "Clôture" ? close > longTrigHigh : high > longTrigHigh
+longSignal  = longSetup and bar_index > longSetupBar and bullBodyOk and aboveSma8 and longBreakOk
+
+bearBodyOk   = close < open and bodyRatio >= minBodyRatio and closePosDn >= minClosePos and elephantOk
+belowSma8    = smaSideMode == "Corps entier" ? math.max(open, close) < smaFast : high < smaFast
+shortBreakOk = breakMode == "Clôture" ? close < shortTrigLow : low < shortTrigLow
+shortSignal  = shortSetup and bar_index > shortSetupBar and bearBodyOk and belowSma8 and shortBreakOk
+
+// =============================================================================
+// 5. BOX LONG / SHORT AU POINT PRÉCIS DU SIGNAL
+//    Label ancré au plus bas (LONG) / plus haut (SHORT) de la bougie de
+//    confirmation, avec les niveaux d'entrée / SL / TP en infobulle.
+// =============================================================================
+buffer = slBufferTicks * syminfo.mintick
+
+fmtLevels(float entry, float sl, float tp1, float tp2) =>
+    "Entrée : " + str.tostring(entry, format.mintick) +
+     "\nSL : "  + str.tostring(sl,  format.mintick) +
+     "\nTP1 (1:" + str.tostring(rr1) + ") : " + str.tostring(tp1, format.mintick) +
+     "\nTP2 (1:" + str.tostring(rr2) + ") : " + str.tostring(tp2, format.mintick)
+
+if longSignal
+    longSetup := false
+    if showLong and barstate.isconfirmed
+        sl   = slMode == "Bougie" ? low - buffer : smaSlow - buffer
+        risk = close - sl
+        tip  = showLevels and risk > 0 ? fmtLevels(close, sl, close + risk * rr1, close + risk * rr2) : ""
+        label.new(bar_index, low, "LONG", style=label.style_label_up, color=longBoxColor, textcolor=longTxtColor, size=labelSize, tooltip=tip)
+
+if shortSignal
+    shortSetup := false
+    if showShort and barstate.isconfirmed
+        sl   = slMode == "Bougie" ? high + buffer : smaSlow + buffer
+        risk = sl - close
+        tip  = showLevels and risk > 0 ? fmtLevels(close, sl, close - risk * rr1, close - risk * rr2) : ""
+        label.new(bar_index, high, "SHORT", style=label.style_label_down, color=shortBoxColor, textcolor=shortTxtColor, size=labelSize, tooltip=tip)
+
+// =============================================================================
+// 6. AFFICHAGE
+// =============================================================================
+plot(smaFast, "SMA Rapide", color=fastColor, linewidth=fastWidth)
+plot(smaSlow, "SMA Lente",  color=slowColor, linewidth=slowWidth)
+
+plotshape(showCross and crossUp,  title="Croisement haussier", style=shape.circle, location=location.belowbar, color=color.new(color.teal, 30),   size=size.tiny, text="X", textcolor=color.new(color.teal, 0))
+plotshape(showCross and crossDn,  title="Croisement baissier", style=shape.circle, location=location.abovebar, color=color.new(color.maroon, 30), size=size.tiny, text="X", textcolor=color.new(color.maroon, 0))
+
+bgcolor(showSetupBg and longSetup  ? color.new(color.green, 92) : na, title="Setup long en attente")
+bgcolor(showSetupBg and shortSetup ? color.new(color.red,   92) : na, title="Setup short en attente")
+
+// =============================================================================
+// 7. ALERTES
+// =============================================================================
+alertcondition(crossUp,     title="Setup LONG (croisement SMA 8/20)",  message="SMA8/20 : croisement haussier sur {{ticker}} ({{interval}}) — attendre la bougie de confirmation.")
+alertcondition(crossDn,     title="Setup SHORT (croisement SMA 8/20)", message="SMA8/20 : croisement baissier sur {{ticker}} ({{interval}}) — attendre la bougie de confirmation.")
+alertcondition(longSignal,  title="Signal LONG",  message="SMA8/20 : bougie de confirmation LONG sur {{ticker}} ({{interval}}) — entrée à la clôture ({{close}}).")
+alertcondition(shortSignal, title="Signal SHORT", message="SMA8/20 : bougie de confirmation SHORT sur {{ticker}} ({{interval}}) — entrée à la clôture ({{close}}).")
