@@ -1,0 +1,215 @@
+//@version=5
+// =============================================================================
+//  Stratégie : Croisement SMA 8/20 + Confirmation Price Action
+//  Inspirations : Oliver Velez (momentum, Elephant Bars, clôture des bougies)
+//                 et méthodes d'entrée EllyDtrade (cassure de la bougie de setup)
+//
+//  Logique :
+//    1. SETUP  : croisement SMA 8 / SMA 20 (crossover = long, crossunder = short)
+//    2. CONFIRMATION : on attend une bougie de conviction qui
+//         - a un corps plein significatif (clôture proche de son extrême),
+//         - clôture entièrement du bon côté de la SMA 8,
+//         - casse le plus haut (long) / plus bas (short) de la bougie de croisement.
+//    3. ENTRÉE : à la clôture de la bougie de confirmation
+//       (process_orders_on_close = true).
+//    4. RISQUE : SL sur la bougie de confirmation OU derrière la SMA 20,
+//       TP par Risk/Reward paramétrable (TP1 = 1:1.5, TP2 = 1:2 par défaut),
+//       sortie dynamique optionnelle si clôture de l'autre côté de la SMA 8.
+// =============================================================================
+strategy("Stratégie SMA 8/20 + Confirmation Price Action (Velez / EllyDtrade)",
+     shorttitle="SMA 8/20 PA",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     pyramiding=0,
+     process_orders_on_close=true,
+     calc_on_every_tick=false)
+
+// =============================================================================
+// 1. INPUTS
+// =============================================================================
+grpMa   = "Moyennes mobiles"
+grpDir  = "Direction"
+grpConf = "Bougie de confirmation (Velez / EllyDtrade)"
+grpRisk = "Gestion du risque"
+
+fastLen = input.int(8,  "SMA Rapide", minval=1, group=grpMa)
+slowLen = input.int(20, "SMA Lente",  minval=2, group=grpMa)
+
+allowLong  = input.bool(true, "Autoriser les LONGS",  group=grpDir)
+allowShort = input.bool(true, "Autoriser les SHORTS", group=grpDir)
+
+maxConfBars  = input.int(5, "Fenêtre de confirmation (bougies)", minval=1, maxval=20, group=grpConf, tooltip="Nombre maximum de bougies après le croisement pour obtenir une confirmation. Passé ce délai, le setup est annulé (évite d'entrer sur un signal périmé).")
+minBodyRatio = input.float(0.55, "Corps minimum (corps / range)", minval=0.1, maxval=1.0, step=0.05, group=grpConf, tooltip="Part minimale du corps dans le range total de la bougie. 0.55 = bougie de conviction avec peu de mèches.")
+minClosePos  = input.float(0.70, "Clôture proche de l'extrême (0-1)", minval=0.5, maxval=1.0, step=0.05, group=grpConf, tooltip="Pour un LONG : (close - low) / (high - low). 0.70 = clôture dans les 30% supérieurs de la bougie → momentum acheteur (style Velez). Symétrique pour un SHORT.")
+useElephant  = input.bool(true, "Filtre 'Elephant Bar' (Velez)", group=grpConf, tooltip="Exige que le corps de la bougie de confirmation soit nettement plus grand que le corps moyen récent : la bougie doit dominer son environnement.")
+elephantMult = input.float(1.3, "Taille mini vs corps moyen (x)", minval=1.0, step=0.1, group=grpConf)
+elephantLen  = input.int(20, "Période du corps moyen", minval=5, group=grpConf)
+smaSideMode  = input.string("Corps entier", "Position exigée vs SMA 8", options=["Corps entier", "Bougie entière"], group=grpConf, tooltip="'Corps entier' : open ET close au-dessus (long) / en dessous (short) de la SMA 8. 'Bougie entière' : mèches comprises (plus strict, moins de signaux).")
+breakMode    = input.string("Clôture", "Cassure de la bougie de croisement", options=["Clôture", "Mèche"], group=grpConf, tooltip="'Clôture' : la bougie de confirmation doit CLÔTURER au-delà du plus haut/plus bas de la bougie qui a initié le croisement (plus fiable). 'Mèche' : une cassure intrabar suffit.")
+
+slMode        = input.string("Bougie", "Type de Stop Loss", options=["Bougie", "SMA 20"], group=grpRisk, tooltip="'Bougie' : juste sous le plus bas (long) / au-dessus du plus haut (short) de la bougie de confirmation. 'SMA 20' : derrière la SMA lente pour laisser respirer le trade.")
+slBufferTicks = input.int(2, "Buffer du SL (ticks)", minval=0, group=grpRisk)
+rr1           = input.float(1.5, "Risk/Reward TP1", minval=0.1, step=0.1, group=grpRisk)
+useTp2        = input.bool(true, "Activer TP2 (sortie partielle)", group=grpRisk)
+rr2           = input.float(2.0, "Risk/Reward TP2", minval=0.1, step=0.1, group=grpRisk)
+tp1QtyPct     = input.float(50, "% de position sortie au TP1", minval=1, maxval=99, group=grpRisk)
+useSma8Exit   = input.bool(true, "Sortie dynamique si clôture de l'autre côté de la SMA 8", group=grpRisk, tooltip="Coupe le trade dès qu'une bougie clôture sous la SMA 8 (long) ou au-dessus (short), même si ni le SL ni le TP ne sont touchés.")
+
+// =============================================================================
+// 2. INDICATEURS & ANATOMIE DE LA BOUGIE
+// =============================================================================
+smaFast = ta.sma(close, fastLen)
+smaSlow = ta.sma(close, slowLen)
+
+crossUp = ta.crossover(smaFast, smaSlow)
+crossDn = ta.crossunder(smaFast, smaSlow)
+
+body       = math.abs(close - open)
+rng        = high - low
+bodyRatio  = rng > 0 ? body / rng : 0.0
+closePosUp = rng > 0 ? (close - low) / rng : 0.0   // 1 = clôture au plus haut
+closePosDn = rng > 0 ? (high - close) / rng : 0.0  // 1 = clôture au plus bas
+avgBody    = ta.sma(body, elephantLen)
+elephantOk = not useElephant or (avgBody > 0 and body >= elephantMult * avgBody)
+
+// =============================================================================
+// 3. MACHINE À ÉTATS DU SETUP
+//    Un croisement arme le setup et mémorise l'extrême de la bougie de
+//    croisement. Le setup expire après maxConfBars ou sur croisement inverse.
+// =============================================================================
+var bool  longSetup     = false
+var float longTrigHigh  = na
+var int   longSetupBar  = na
+var bool  shortSetup    = false
+var float shortTrigLow  = na
+var int   shortSetupBar = na
+
+if crossUp
+    longSetup     := true
+    longTrigHigh  := high
+    longSetupBar  := bar_index
+    shortSetup    := false
+if crossDn
+    shortSetup    := true
+    shortTrigLow  := low
+    shortSetupBar := bar_index
+    longSetup     := false
+
+// Expiration de la fenêtre de confirmation
+if longSetup and bar_index - longSetupBar > maxConfBars
+    longSetup := false
+if shortSetup and bar_index - shortSetupBar > maxConfBars
+    shortSetup := false
+
+// =============================================================================
+// 4. BOUGIE DE CONFIRMATION
+// =============================================================================
+// --- LONG : bougie haussière de conviction ---
+bullBodyOk  = close > open and bodyRatio >= minBodyRatio and closePosUp >= minClosePos and elephantOk
+aboveSma8   = smaSideMode == "Corps entier" ? math.min(open, close) > smaFast : low > smaFast
+longBreakOk = breakMode == "Clôture" ? close > longTrigHigh : high > longTrigHigh
+longConfirm = longSetup and bar_index > longSetupBar and bullBodyOk and aboveSma8 and longBreakOk
+
+// --- SHORT : bougie baissière de conviction ---
+bearBodyOk   = close < open and bodyRatio >= minBodyRatio and closePosDn >= minClosePos and elephantOk
+belowSma8    = smaSideMode == "Corps entier" ? math.max(open, close) < smaFast : high < smaFast
+shortBreakOk = breakMode == "Clôture" ? close < shortTrigLow : low < shortTrigLow
+shortConfirm = shortSetup and bar_index > shortSetupBar and bearBodyOk and belowSma8 and shortBreakOk
+
+// =============================================================================
+// 5. ENTRÉES & CALCUL DES NIVEAUX (SL / TP)
+// =============================================================================
+var float slPrice  = na
+var float tp1Price = na
+var float tp2Price = na
+
+buffer  = slBufferTicks * syminfo.mintick
+canTrade = strategy.position_size == 0
+
+longEntry  = longConfirm and allowLong and canTrade
+shortEntry = shortConfirm and allowShort and canTrade
+
+if longEntry
+    sl   = slMode == "Bougie" ? low - buffer : smaSlow - buffer
+    risk = close - sl
+    if risk > 0
+        strategy.entry("Long", strategy.long, comment="LONG")
+        slPrice  := sl
+        tp1Price := close + risk * rr1
+        tp2Price := close + risk * rr2
+    longSetup := false
+
+if shortEntry
+    sl   = slMode == "Bougie" ? high + buffer : smaSlow + buffer
+    risk = sl - close
+    if risk > 0
+        strategy.entry("Short", strategy.short, comment="SHORT")
+        slPrice  := sl
+        tp1Price := close - risk * rr1
+        tp2Price := close - risk * rr2
+    shortSetup := false
+
+// =============================================================================
+// 6. SORTIES (SL / TP / SMA 8)
+//    Les ordres de sortie sont (re)soumis dès l'entrée puis à chaque bougie,
+//    tant que la position est ouverte.
+// =============================================================================
+manageLong  = strategy.position_size > 0 or longEntry
+manageShort = strategy.position_size < 0 or shortEntry
+
+if manageLong and not na(slPrice)
+    if useTp2
+        strategy.exit("L-TP1", from_entry="Long", qty_percent=tp1QtyPct, limit=tp1Price, stop=slPrice, comment_profit="TP1", comment_loss="SL")
+        strategy.exit("L-TP2", from_entry="Long", limit=tp2Price, stop=slPrice, comment_profit="TP2", comment_loss="SL")
+    else
+        strategy.exit("L-TP", from_entry="Long", limit=tp1Price, stop=slPrice, comment_profit="TP", comment_loss="SL")
+
+if manageShort and not na(slPrice)
+    if useTp2
+        strategy.exit("S-TP1", from_entry="Short", qty_percent=tp1QtyPct, limit=tp1Price, stop=slPrice, comment_profit="TP1", comment_loss="SL")
+        strategy.exit("S-TP2", from_entry="Short", limit=tp2Price, stop=slPrice, comment_profit="TP2", comment_loss="SL")
+    else
+        strategy.exit("S-TP", from_entry="Short", limit=tp1Price, stop=slPrice, comment_profit="TP", comment_loss="SL")
+
+// Sortie dynamique : clôture de l'autre côté de la SMA 8
+if useSma8Exit and strategy.position_size > 0 and close < smaFast
+    strategy.close("Long", comment="Sortie SMA8")
+if useSma8Exit and strategy.position_size < 0 and close > smaFast
+    strategy.close("Short", comment="Sortie SMA8")
+
+// =============================================================================
+// 7. AFFICHAGE
+// =============================================================================
+plot(smaFast, "SMA 8",  color=color.new(color.orange, 0), linewidth=2)
+plot(smaSlow, "SMA 20", color=color.new(#2962FF, 0),      linewidth=2)
+
+// Croisements (setup armé, pas encore d'entrée)
+plotshape(crossUp, title="Croisement haussier", style=shape.circle, location=location.belowbar, color=color.new(color.teal, 30), size=size.tiny, text="X", textcolor=color.new(color.teal, 0))
+plotshape(crossDn, title="Croisement baissier", style=shape.circle, location=location.abovebar, color=color.new(color.maroon, 30), size=size.tiny, text="X", textcolor=color.new(color.maroon, 0))
+
+// Fond coloré tant que le setup attend sa confirmation
+bgcolor(longSetup  ? color.new(color.green, 92) : na, title="Setup long en attente")
+bgcolor(shortSetup ? color.new(color.red,   92) : na, title="Setup short en attente")
+
+// Bougies de confirmation (entrées)
+plotshape(longEntry,  title="Entrée LONG",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.green, 0), size=size.small, text="LONG",  textcolor=color.new(color.green, 0))
+plotshape(shortEntry, title="Entrée SHORT", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),   size=size.small, text="SHORT", textcolor=color.new(color.red, 0))
+
+// Niveaux actifs
+inPos = strategy.position_size != 0
+plot(inPos ? slPrice : na,               title="Stop Loss", color=color.new(color.red, 0),   style=plot.style_linebr, linewidth=1)
+plot(inPos ? tp1Price : na,              title="TP1",       color=color.new(color.green, 0), style=plot.style_linebr, linewidth=1)
+plot(inPos and useTp2 ? tp2Price : na,   title="TP2",       color=color.new(color.lime, 30), style=plot.style_linebr, linewidth=1)
+
+// =============================================================================
+// 8. ALERTES
+// =============================================================================
+alertcondition(crossUp,      title="Setup LONG (croisement SMA 8/20)",  message="SMA8/20 : croisement haussier sur {{ticker}} ({{interval}}) — attendre la bougie de confirmation.")
+alertcondition(crossDn,      title="Setup SHORT (croisement SMA 8/20)", message="SMA8/20 : croisement baissier sur {{ticker}} ({{interval}}) — attendre la bougie de confirmation.")
+alertcondition(longConfirm,  title="Confirmation LONG",  message="SMA8/20 : bougie de confirmation LONG sur {{ticker}} ({{interval}}) — entrée à la clôture ({{close}}).")
+alertcondition(shortConfirm, title="Confirmation SHORT", message="SMA8/20 : bougie de confirmation SHORT sur {{ticker}} ({{interval}}) — entrée à la clôture ({{close}}).")
