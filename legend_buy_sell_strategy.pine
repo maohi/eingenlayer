@@ -88,6 +88,41 @@ sell_text_message = input.string(
      group = webhook_group
 )
 
+// ─────────────────────────────────────────────
+// Take Profit / Stop Loss inputs
+// ─────────────────────────────────────────────
+exit_group = "Take Profit / Stop Loss"
+
+use_tp = input.bool(
+     defval = true,
+     title = "Enable Take Profit",
+     group = exit_group
+)
+
+tp_percent = input.float(
+     defval = 2.0,
+     title = "Take Profit (%)",
+     minval = 0.1,
+     step = 0.1,
+     tooltip = "Distance du TP en % depuis le prix d'entrée moyen.",
+     group = exit_group
+)
+
+use_sl = input.bool(
+     defval = false,
+     title = "Enable Stop Loss",
+     group = exit_group
+)
+
+sl_percent = input.float(
+     defval = 1.0,
+     title = "Stop Loss (%)",
+     minval = 0.1,
+     step = 0.1,
+     tooltip = "Distance du SL en % depuis le prix d'entrée moyen.",
+     group = exit_group
+)
+
 // Directional movement calculation
 dirmov(simple int len) =>
     float up = ta.change(high)
@@ -203,6 +238,39 @@ if bearish
          id = "Sell",
          direction = strategy.short,
          alert_message = buildWebhookMessage("SELL")
+    )
+
+// ─────────────────────────────────────────────
+// Take Profit / Stop Loss exits
+// ─────────────────────────────────────────────
+// Les sorties sont déclenchées par des ordres limit (TP) / stop (SL).
+// Les webhooks de sortie passent par les alertes "Exécution des ordres" :
+// alert_profit est envoyé quand le TP est touché, alert_loss quand le SL saute.
+float avg_price = strategy.position_avg_price
+
+float long_tp_price = avg_price * (1 + tp_percent / 100)
+float long_sl_price = avg_price * (1 - sl_percent / 100)
+float short_tp_price = avg_price * (1 - tp_percent / 100)
+float short_sl_price = avg_price * (1 + sl_percent / 100)
+
+if strategy.position_size > 0 and (use_tp or use_sl)
+    strategy.exit(
+         id = "TP/SL Buy",
+         from_entry = "Buy",
+         limit = use_tp ? long_tp_price : na,
+         stop = use_sl ? long_sl_price : na,
+         alert_profit = buildWebhookMessage("EXIT_BUY_TP"),
+         alert_loss = buildWebhookMessage("EXIT_BUY_SL")
+    )
+
+if strategy.position_size < 0 and (use_tp or use_sl)
+    strategy.exit(
+         id = "TP/SL Sell",
+         from_entry = "Sell",
+         limit = use_tp ? short_tp_price : na,
+         stop = use_sl ? short_sl_price : na,
+         alert_profit = buildWebhookMessage("EXIT_SELL_TP"),
+         alert_loss = buildWebhookMessage("EXIT_SELL_SL")
     )
 
 // ─────────────────────────────────────────────
