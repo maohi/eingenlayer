@@ -1,0 +1,260 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// at https://mozilla.org/MPL/2.0/
+// © Sascha Sambale, adapted to strategy by Grok
+// Webhook BUY/SELL alerts added
+
+//@version=6
+strategy(
+     title = "Legend BUY SELL",
+     shorttitle = "Legend BUY SELL Str",
+     overlay = true,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 100,
+     pyramiding = 1,
+     margin_long = 0,
+     margin_short = 0
+)
+
+// Inputs
+fast_length = input.int(
+     defval = 5,
+     title = "Fast Length"
+)
+
+slow_length = input.int(
+     defval = 13,
+     title = "Slow Length"
+)
+
+src = input.source(
+     defval = close,
+     title = "Source"
+)
+
+signal_length = input.int(
+     defval = 9,
+     title = "Signal Smoothing",
+     minval = 1,
+     maxval = 50
+)
+
+// ADX inputs
+adxlen = input.int(
+     defval = 14,
+     title = "ADX Smoothing"
+)
+
+dilen = input.int(
+     defval = 10,
+     title = "DI Length"
+)
+
+adx_threshold = input.float(
+     defval = 25.0,
+     title = "ADX Threshold"
+)
+
+// ─────────────────────────────────────────────
+// Webhook inputs
+// ─────────────────────────────────────────────
+webhook_group = "Webhook Alerts"
+
+use_json_payload = input.bool(
+     defval = true,
+     title = "Use JSON payload for webhooks",
+     tooltip = "ON : envoie un message JSON structuré (compatible bots " +
+         "3Commas / Alertatron / WunderTrading, etc.). " +
+         "OFF : envoie un message texte simple.",
+     group = webhook_group
+)
+
+webhook_passphrase = input.string(
+     defval = "",
+     title = "Webhook Passphrase (optional)",
+     tooltip = "Clé secrète ajoutée au payload JSON pour authentifier " +
+         "l'alerte côté serveur/bot. Laisser vide si inutile.",
+     group = webhook_group
+)
+
+buy_text_message = input.string(
+     defval = "BUY {{ticker}} @ {{close}}",
+     title = "BUY text message",
+     group = webhook_group
+)
+
+sell_text_message = input.string(
+     defval = "SELL {{ticker}} @ {{close}}",
+     title = "SELL text message",
+     group = webhook_group
+)
+
+// Directional movement calculation
+dirmov(simple int len) =>
+    float up = ta.change(high)
+    float down = -ta.change(low)
+
+    float plusDM = na(up) ? na :
+         up > down and up > 0 ? up : 0
+
+    float minusDM = na(down) ? na :
+         down > up and down > 0 ? down : 0
+
+    float trueRange = ta.rma(ta.tr(true), len)
+
+    float plus = fixnan(
+         100 * ta.rma(plusDM, len) / trueRange
+    )
+
+    float minus = fixnan(
+         100 * ta.rma(minusDM, len) / trueRange
+    )
+
+    [plus, minus]
+
+// ADX calculation
+adx(simple int diLength, simple int adxLength) =>
+    [plus, minus] = dirmov(diLength)
+
+    float sumValue = plus + minus
+
+    float adxValue = 100 * ta.rma(
+         math.abs(plus - minus) /
+         (sumValue == 0 ? 1 : sumValue),
+         adxLength
+    )
+
+    adxValue
+
+sig = adx(dilen, adxlen)
+
+// Original plot colors
+col_grow_above = #26A69A
+col_grow_below = #FFCDD2
+col_fall_above = #B2DFDB
+col_fall_below = #EF5350
+col_macd = #0094FF
+col_signal = #FF6A00
+
+// Original calculations
+fast_ma = ta.ema(src, fast_length)
+slow_ma = ta.ema(src, slow_length)
+
+macd = fast_ma - slow_ma
+signal = ta.ema(macd, signal_length)
+hist = macd - signal
+
+// Original signal logic
+macd_crossup =
+     macd < 0 and
+     ta.crossover(macd, signal)
+
+macd_crossdown =
+     macd > 0 and
+     ta.crossunder(macd, signal)
+
+bullish =
+     sig > adx_threshold and
+     macd_crossup
+
+bearish =
+     sig > adx_threshold and
+     macd_crossdown
+
+// ─────────────────────────────────────────────
+// Webhook message builder
+// ─────────────────────────────────────────────
+// Construit un payload JSON dynamique (action, symbole, prix, heure...)
+// prêt à être consommé par un bot de trading via webhook.
+buildWebhookMessage(string action) =>
+    string jsonMsg =
+         '{' +
+         '"passphrase":"' + webhook_passphrase + '",' +
+         '"action":"' + action + '",' +
+         '"ticker":"' + syminfo.ticker + '",' +
+         '"exchange":"' + syminfo.prefix + '",' +
+         '"symbol":"' + syminfo.tickerid + '",' +
+         '"price":' + str.tostring(close) + ',' +
+         '"time":"' + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", "UTC") + '",' +
+         '"interval":"' + timeframe.period + '",' +
+         '"adx":' + str.tostring(sig, "#.##") + ',' +
+         '"macd":' + str.tostring(macd, "#.#####") + ',' +
+         '"strategy":"Legend BUY SELL"' +
+         '}'
+
+    string textMsg = action == "BUY" ?
+         buy_text_message :
+         sell_text_message
+
+    use_json_payload ? jsonMsg : textMsg
+
+// Strategy entries with webhook alert messages
+// Configurer l'alerte TradingView avec le placeholder
+// {{strategy.order.alert_message}} dans le champ "Message"
+// pour transmettre ce payload au webhook.
+if bullish
+    strategy.entry(
+         id = "Buy",
+         direction = strategy.long,
+         alert_message = buildWebhookMessage("BUY")
+    )
+
+if bearish
+    strategy.entry(
+         id = "Sell",
+         direction = strategy.short,
+         alert_message = buildWebhookMessage("SELL")
+    )
+
+// ─────────────────────────────────────────────
+// Webhook alerts (fonction alert() dynamique)
+// ─────────────────────────────────────────────
+// Alternative : créer une alerte TradingView sur
+// "Any alert() function call" — le payload JSON/texte
+// est envoyé tel quel à l'URL du webhook.
+if bullish
+    alert(
+         message = buildWebhookMessage("BUY"),
+         freq = alert.freq_once_per_bar_close
+    )
+
+if bearish
+    alert(
+         message = buildWebhookMessage("SELL"),
+         freq = alert.freq_once_per_bar_close
+    )
+
+// Alerts (statiques, conservées pour compatibilité)
+alertcondition(
+     condition = bullish,
+     title = "Bullish MACD Crossover detected",
+     message = "Bullish trend detected"
+)
+
+alertcondition(
+     condition = bearish,
+     title = "Bearish MACD Crossover detected",
+     message = "Bearish trend detected"
+)
+
+// Buy and sell labels
+plotshape(
+     series = bullish,
+     title = "buy",
+     text = "Buy",
+     color = color.green,
+     style = shape.labelup,
+     location = location.belowbar,
+     size = size.small,
+     textcolor = color.white
+)
+
+plotshape(
+     series = bearish,
+     title = "sell",
+     text = "Sell",
+     color = color.red,
+     style = shape.labeldown,
+     location = location.abovebar,
+     size = size.small,
+     textcolor = color.white
+)
