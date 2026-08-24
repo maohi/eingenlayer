@@ -1,0 +1,260 @@
+//@version=6
+// =============================================================================
+//  MARKET DASHBOARD + TREND  (Pine Script v6)
+//  Rows : Squeeze | Strength | Momentum | ADX | MACD | Biais | TREND
+//  TREND : Range / Consolidation  vs  Breakout Haussier  vs  Breakout Baissier
+// =============================================================================
+indicator("Market Dashboard + TREND", shorttitle="MKT DASH", overlay=true, max_lines_count=100, max_labels_count=200)
+
+// -----------------------------------------------------------------------------
+// INPUTS
+// -----------------------------------------------------------------------------
+grpSqz = "Squeeze (TTM)"
+bbLen    = input.int(20,   "BB / KC length",        minval=2,               group=grpSqz)
+bbMult   = input.float(2.0,"BB multiplier",         minval=0.1, step=0.1,   group=grpSqz)
+kcMult   = input.float(1.5,"KC multiplier (ATR)",   minval=0.1, step=0.1,   group=grpSqz)
+
+grpMom = "Momentum / MACD / ADX"
+momLen   = input.int(20,  "Momentum length",        minval=2,               group=grpMom)
+macdFast = input.int(12,  "MACD fast",              minval=1,               group=grpMom)
+macdSlow = input.int(26,  "MACD slow",              minval=1,               group=grpMom)
+macdSig  = input.int(9,   "MACD signal",            minval=1,               group=grpMom)
+adxLen   = input.int(14,  "ADX / DI length",        minval=1,               group=grpMom)
+adxSmo   = input.int(14,  "ADX smoothing",          minval=1,               group=grpMom)
+rsiLen   = input.int(14,  "RSI length",             minval=1,               group=grpMom)
+emaFastL = input.int(21,  "EMA rapide",             minval=1,               group=grpMom)
+emaSlowL = input.int(50,  "EMA lente",              minval=1,               group=grpMom)
+emaBiasL = input.int(200, "EMA de fond (biais)",    minval=1,               group=grpMom)
+
+grpTrend = "TREND — Range / Breakout"
+dcLen     = input.int(20,   "Donchian (canal de range)",     minval=2,               group=grpTrend)
+bbwLook   = input.int(100,  "Lookback compression (BBW %R)", minval=10,              group=grpTrend)
+bbwSqzPct = input.float(25, "Compression max pour Range (%)",minval=1, maxval=100,   group=grpTrend)
+adxRange  = input.float(20, "ADX max en Range",              minval=1,               group=grpTrend)
+adxTrend  = input.float(23, "ADX min pour valider Breakout", minval=1,               group=grpTrend)
+useVol    = input.bool(true,"Confirmer breakout par volume",                         group=grpTrend)
+volMult   = input.float(1.3,"Volume > x moyenne",            minval=0.1, step=0.1,   group=grpTrend)
+volLen    = input.int(20,   "Moyenne de volume",             minval=1,               group=grpTrend)
+atrBuf    = input.float(0.1,"Marge de cassure (x ATR)",      minval=0.0, step=0.05,  group=grpTrend)
+holdBars  = input.int(10,   "Durée max d'un état Breakout",  minval=1,               group=grpTrend)
+
+grpHtf = "Confirmation HTF (optionnelle)"
+useHtf = input.bool(false, "Activer la confirmation HTF",   group=grpHtf)
+htfRes = input.timeframe("240", "Unité de temps supérieure", group=grpHtf)
+
+grpUi = "Affichage"
+tabPos   = input.string("Haut droite", "Position du tableau", options=["Haut droite","Haut gauche","Bas droite","Bas gauche","Milieu droite"], group=grpUi)
+txtSize  = input.string("Normal", "Taille du texte", options=["Petit","Normal","Grand"], group=grpUi)
+showLvls = input.bool(true,  "Afficher le canal de range",  group=grpUi)
+showBg   = input.bool(true,  "Colorer le fond selon TREND", group=grpUi)
+showMark = input.bool(true,  "Marquer les cassures",        group=grpUi)
+
+// -----------------------------------------------------------------------------
+// CALCULS DE BASE
+// -----------------------------------------------------------------------------
+basis    = ta.sma(close, bbLen)
+dev      = bbMult * ta.stdev(close, bbLen)
+bbUpper  = basis + dev
+bbLower  = basis - dev
+
+atr      = ta.atr(bbLen)
+kcUpper  = basis + kcMult * atr
+kcLower  = basis - kcMult * atr
+
+// --- Squeeze TTM : les bandes de Bollinger rentrent dans les Keltner
+squeezeOn   = bbLower > kcLower and bbUpper < kcUpper
+squeezeOff  = bbLower < kcLower and bbUpper > kcUpper
+squeezeFired = squeezeOn[1] and not squeezeOn
+
+// --- Momentum TTM (régression linéaire de l'écart au milieu du canal)
+donHi   = ta.highest(high, momLen)
+donLo   = ta.lowest(low,  momLen)
+midMom  = math.avg(math.avg(donHi, donLo), ta.sma(close, momLen))
+mom     = ta.linreg(close - midMom, momLen, 0)
+momBull = mom > 0
+momUp   = mom > nz(mom[1])
+
+// --- MACD
+[macdLine, sigLine, macdHist] = ta.macd(close, macdFast, macdSlow, macdSig)
+
+// --- ADX / DI
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxSmo)
+adxRising = adx > nz(adx[1])
+
+// --- Moyennes / RSI
+emaFast = ta.ema(close, emaFastL)
+emaSlow = ta.ema(close, emaSlowL)
+emaBias = ta.ema(close, emaBiasL)
+rsi     = ta.rsi(close, rsiLen)
+
+// -----------------------------------------------------------------------------
+// STRENGTH — score haussier composite 0 → 100 %
+// -----------------------------------------------------------------------------
+sc(bool cond, float w) => cond ? w : 0.0
+
+sTrend = sc(emaFast > emaSlow, 1.0)
+sBias  = sc(close > emaBias, 1.0)
+sMacd  = sc(macdLine > sigLine, 1.0)
+sHist  = sc(macdHist > 0, 1.0)
+sMom   = sc(momBull, 1.0)
+sDi    = sc(diPlus > diMinus, 1.0)
+sRsi   = math.max(0.0, math.min(1.0, (rsi - 30.0) / 40.0))
+
+scoreRaw = sTrend + sBias + sMacd + sHist + sMom + sDi + sRsi
+strength = math.round(100.0 * scoreRaw / 7.0)
+
+// --- Biais global
+biasBull = strength >= 60
+biasBear = strength <= 40
+biasTxt  = biasBull ? "▲ Haussier" : biasBear ? "▼ Baissier" : "◆ Neutre"
+biasCol  = biasBull ? color.new(#26a69a, 0) : biasBear ? color.new(#ef5350, 0) : color.new(#ffb300, 0)
+
+// -----------------------------------------------------------------------------
+// TREND — Range de consolidation vs Breakout haussier / baissier
+// -----------------------------------------------------------------------------
+// Canal de range (Donchian décalé d'une barre : on casse le niveau précédent)
+rangeHi = ta.highest(high, dcLen)[1]
+rangeLo = ta.lowest(low,  dcLen)[1]
+rangeMid = math.avg(rangeHi, rangeLo)
+
+// Compression relative des bandes (BBW percentile sur bbwLook barres)
+bbw     = basis != 0 ? (bbUpper - bbLower) / basis * 100.0 : 0.0
+bbwRank = ta.percentrank(bbw, bbwLook)
+
+// Volume de confirmation
+volAvg = ta.sma(volume, volLen)
+volOk  = not useVol or na(volume) or volume > volAvg * volMult
+
+// Confirmation HTF facultative (biais de la MM lente supérieure)
+htfClose = useHtf ? request.security(syminfo.tickerid, htfRes, close,   barmerge.gaps_off, barmerge.lookahead_off) : close
+htfEma   = useHtf ? request.security(syminfo.tickerid, htfRes, ta.ema(close, emaSlowL), barmerge.gaps_off, barmerge.lookahead_off) : emaSlow
+htfBull  = not useHtf or htfClose >= htfEma
+htfBear  = not useHtf or htfClose <= htfEma
+
+// Cassures brutes du canal, avec marge en ATR
+buf     = atrBuf * atr
+breakUp = close > rangeHi + buf
+breakDn = close < rangeLo - buf
+
+// Cassures validées
+bullBreak = breakUp and adx > adxTrend and momBull and diPlus > diMinus and volOk and htfBull
+bearBreak = breakDn and adx > adxTrend and not momBull and diMinus > diPlus and volOk and htfBear
+
+// Consolidation : faible ADX + bandes comprimées + prix contenu dans le canal
+inRange   = close <= rangeHi and close >= rangeLo
+isRange   = inRange and adx < adxRange and bbwRank < bbwSqzPct
+isSqueeze = squeezeOn
+
+// État persistant : un breakout reste actif tant qu'il n'est pas invalidé
+var int    trendState = 0        // 2 = breakout haut, 1 = tendance haut, 0 = range, -1 = tendance bas, -2 = breakout bas
+var int    stateBars  = 0
+
+newBull = bullBreak and trendState <  2
+newBear = bearBreak and trendState > -2
+
+if bullBreak
+    trendState := 2
+    stateBars  := 0
+else if bearBreak
+    trendState := -2
+    stateBars  := 0
+else
+    stateBars := stateBars + 1
+    if trendState == 2
+        // le breakout haussier dégénère : retour dans le canal ou momentum perdu
+        trendState := (close < rangeMid or not momBull) ? 0 : (stateBars > holdBars ? 1 : 2)
+    else if trendState == -2
+        trendState := (close > rangeMid or momBull) ? 0 : (stateBars > holdBars ? -1 : -2)
+    else if isRange or isSqueeze
+        trendState := 0
+    else if adx > adxTrend and emaFast > emaSlow and close > emaBias
+        trendState := 1
+    else if adx > adxTrend and emaFast < emaSlow and close < emaBias
+        trendState := -1
+    else
+        trendState := 0
+
+trendTxt = switch trendState
+    2  => "▲ BREAKOUT HAUSSIER"
+    1  => "▲ Tendance haussière"
+    -1 => "▼ Tendance baissière"
+    -2 => "▼ BREAKOUT BAISSIER"
+    => isSqueeze ? "■ Range (compression)" : "■ Range / Consolidation"
+
+trendCol = switch trendState
+    2  => color.new(#26a69a, 0)
+    1  => color.new(#66bb6a, 0)
+    -1 => color.new(#ef9a9a, 0)
+    -2 => color.new(#ef5350, 0)
+    => color.new(#ffb300, 0)
+
+// -----------------------------------------------------------------------------
+// LIBELLÉS DES AUTRES LIGNES
+// -----------------------------------------------------------------------------
+sqzTxt = squeezeOn ? "Compression" : squeezeFired ? (momBull ? "Breakout ▲" : "Breakout ▼") : squeezeOff ? (momBull ? "Breakout ▲" : "Breakout ▼") : "Neutre"
+sqzCol = squeezeOn ? color.new(#ffb300, 0) : momBull ? color.new(#26a69a, 0) : color.new(#ef5350, 0)
+
+momTxt = (momBull ? "▲ Bull" : "▼ Bear") + (momUp == momBull ? "" : " (essouf.)")
+momCol = momBull ? color.new(#26a69a, 0) : color.new(#ef5350, 0)
+
+strCol = strength >= 60 ? color.new(#26a69a, 0) : strength <= 40 ? color.new(#ef5350, 0) : color.new(#ffee58, 0)
+adxTxt = str.tostring(adx, "#0.0") + (adxRising ? " ↑" : " ↓")
+adxCol = adx >= 25 ? color.new(#ffffff, 0) : color.new(#b0bec5, 0)
+macdCol = macdHist > 0 ? color.new(#26a69a, 0) : color.new(#ef5350, 0)
+
+// -----------------------------------------------------------------------------
+// TABLEAU
+// -----------------------------------------------------------------------------
+pos = switch tabPos
+    "Haut gauche"   => position.top_left
+    "Bas droite"    => position.bottom_right
+    "Bas gauche"    => position.bottom_left
+    "Milieu droite" => position.middle_right
+    => position.top_right
+
+sz = switch txtSize
+    "Petit" => size.small
+    "Grand" => size.large
+    => size.normal
+
+bgDark  = color.new(#0e1017, 0)
+bgHead  = color.new(#1a1b26, 0)
+brdCol  = color.new(#7b2ff7, 0)
+lblCol  = color.new(#c9a7ff, 0)
+
+var table dash = table.new(pos, 2, 8, border_width=1, border_color=brdCol, frame_width=1, frame_color=brdCol)
+
+row(int r, string label, string val, color valCol) =>
+    table.cell(dash, 0, r, label, text_color=lblCol,  text_halign=text.align_left,  bgcolor=bgDark, text_size=sz)
+    table.cell(dash, 1, r, val,   text_color=valCol,  text_halign=text.align_right, bgcolor=bgDark, text_size=sz)
+
+if barstate.islast
+    table.cell(dash, 0, 0, "—  Market  —", text_color=color.new(#e0d7ff, 0), bgcolor=bgHead, text_size=sz)
+    table.cell(dash, 1, 0, "",             text_color=color.new(#e0d7ff, 0), bgcolor=bgHead, text_size=sz)
+    row(1, "Squeeze",  sqzTxt,                              sqzCol)
+    row(2, "Strength", str.tostring(strength, "#0") + "%",   strCol)
+    row(3, "Momentum", momTxt,                              momCol)
+    row(4, "ADX",      adxTxt,                              adxCol)
+    row(5, "MACD",     str.tostring(macdHist, "#0.00"),      macdCol)
+    row(6, "Biais",    biasTxt,                             biasCol)
+    row(7, "TREND",    trendTxt,                            trendCol)
+
+// -----------------------------------------------------------------------------
+// VISUEL SUR LE GRAPHIQUE
+// -----------------------------------------------------------------------------
+pHi = plot(showLvls ? rangeHi : na, "Haut du range", color=color.new(#7b2ff7, 30), style=plot.style_linebr)
+pLo = plot(showLvls ? rangeLo : na, "Bas du range",  color=color.new(#7b2ff7, 30), style=plot.style_linebr)
+fill(pHi, pLo, color=showLvls and trendState == 0 ? color.new(#ffb300, 92) : na, title="Zone de range")
+
+bgcolor(showBg ? (trendState == 2 ? color.new(#26a69a, 88) : trendState == -2 ? color.new(#ef5350, 88) : trendState == 0 ? color.new(#ffb300, 94) : na) : na, title="Fond TREND")
+
+plotshape(showMark and newBull, title="Breakout haussier", style=shape.triangleup,   location=location.belowbar, color=color.new(#26a69a, 0), size=size.tiny, text="BO▲", textcolor=color.new(#26a69a, 0))
+plotshape(showMark and newBear, title="Breakout baissier", style=shape.triangledown, location=location.abovebar, color=color.new(#ef5350, 0), size=size.tiny, text="BO▼", textcolor=color.new(#ef5350, 0))
+
+// -----------------------------------------------------------------------------
+// ALERTES
+// -----------------------------------------------------------------------------
+alertcondition(newBull,   "Breakout haussier", "TREND : breakout haussier confirmé")
+alertcondition(newBear,   "Breakout baissier", "TREND : breakout baissier confirmé")
+alertcondition(trendState == 0 and nz(trendState[1], 0) != 0, "Entrée en range", "TREND : retour en range / consolidation")
+alertcondition(squeezeFired, "Sortie de compression", "Squeeze : sortie de compression")
