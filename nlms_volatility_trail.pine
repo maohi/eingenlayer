@@ -1,0 +1,171 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © BackQuant — non-repaint refactor / optimized
+
+//@version=6
+// max_bars_back : le filtre remonte jusqu'à src[M + 1] (203 barres au pire, M = 200).
+// On réserve le buffer explicitement pour éviter "cannot determine the referencing length".
+indicator("NLMS Volatility Trail [Non-Repaint]", overlay = true, max_labels_count = 500, max_bars_back = 300)
+
+const string g1  = "NLMS Filter"
+const string g2  = "ATR Calculation Settings"
+const string g3  = "Signals"
+const string plt = "Plotting Settings"
+
+// ── Inputs ────────────────────────────────────────────────────────────────
+float src  = input.source(close, "Source", group = g1)
+int   taps = input.int(72, "Filter Taps (M)", minval = 2, maxval = 200, group = g1, tooltip = "Nombre de barres passées (poids appris). Plus de taps = plus de mémoire / plus lisse.")
+float mu   = input.float(0.195, "Step Size (μ)", minval = 0.001, maxval = 1.50, step = 0.001, group = g1, tooltip = "Taux d'apprentissage.")
+float eps  = input.float(0.6, "Regularization (ε)", minval = 0.0, step = 0.1, group = g1)
+
+int   periodAtr = input.int(14,  "Period", group = g2)
+float factorAtr = input.float(1.7, "Factor", step = 0.01, group = g2)
+
+bool nonRepaint  = input.bool(true,  "Strict Non-Repaint (ATR sur barre clôturée)", group = g3, tooltip = "Gèle totalement le trail sur la barre en cours. Le signal est validé à la clôture.")
+bool confirmFlip = input.bool(true,  "Confirmer le flip par le prix", group = g3, tooltip = "LONG seulement si la clôture est au-dessus du trail (inverse pour SHORT). Supprime les micro-retournements.")
+bool showSignals = input.bool(true,  "Afficher LONG / SHORT", group = g3)
+bool showPriceLbl= input.bool(false, "Labels avec prix", group = g3)
+
+color longCol  = input.color(#00ff00, "Long Color",  group = plt)
+color shortCol = input.color(#ff0000, "Short Color", group = plt)
+int   lineW    = input.int(3, "Line Width", group = plt)
+bool  showFill = input.bool(true, "Gradient Fill", group = plt)
+bool  showGlow = input.bool(true, "Trail Glow",    group = plt)
+bool  paintBar = input.bool(true, "Color Bars",    group = plt)
+
+// ── Palette pré-calculée (une seule fois, pas à chaque barre) ──────────────
+var color cLongSolid  = color.new(longCol,  0)
+var color cShortSolid = color.new(shortCol, 0)
+var color cLongFade   = color.new(longCol,  90)
+var color cLongCore   = color.new(longCol,  20)
+var color cShortFade  = color.new(shortCol, 90)
+var color cShortCore  = color.new(shortCol, 20)
+var color cLongGlow   = color.new(longCol,  55)
+var color cShortGlow  = color.new(shortCol, 55)
+var color cFlatGlow   = color.new(color.gray, 55)
+
+// ── Puissance du signal : somme glissante O(1) au lieu d'une boucle O(M) ───
+// power(t) = Σ src[1..M]²  ->  math.sum() maintient la somme en interne.
+float sqSum = math.sum(src * src, taps)
+float power = nz(sqSum[1])
+
+// ── NLMS adaptatif, sans repaint ──────────────────────────────────────────
+// La prédiction n'utilise QUE src[1..M] (barres clôturées) -> valeur figée intrabar.
+// Optimisation : la mise à jour des poids de la barre t-1 est *fusionnée* dans la
+// boucle de prédiction de la barre t. On passe de 2 boucles O(M) par barre à 1
+// seule, et la boucle de puissance disparaît (somme glissante ci-dessus).
+// Mathématiquement identique : la prédiction de t utilise toujours des poids
+// appris jusqu'à t-1 inclus.
+nlms(float source, simple int M, float step, float reg, float pw) =>
+    var array<float> w = array.new_float(M, 1.0 / M)   // prior = SMA
+    var int   lastLearn = -1        // garde-fou : 1 seule mise à jour par barre
+    var float pendErr   = 0.0       // erreur de la dernière barre clôturée
+    var float pendGain  = 0.0       // step / (ε + power) de cette même barre
+    var bool  hasPend   = false
+
+    float est = na
+    if bar_index >= M
+        float pred = 0.0
+        // Un seul apprentissage par barre : sur historique c'est systématique,
+        // en temps réel seul le 1er tick l'applique -> le var array n'est jamais corrompu.
+        if hasPend and lastLearn != bar_index
+            lastLearn := bar_index
+            float g = pendGain * pendErr
+            for i = 0 to M - 1
+                float wi = array.get(w, i) + g * source[i + 2]   // fenêtre de t-1
+                array.set(w, i, wi)
+                pred += wi * source[i + 1]                       // fenêtre de t
+        else
+            for i = 0 to M - 1
+                pred += array.get(w, i) * source[i + 1]
+        est := pred
+        // On mémorise l'erreur/gain à la clôture ; l'application se fera au 1er tick suivant.
+        if barstate.isconfirmed
+            pendErr  := source - pred
+            pendGain := step / math.max(reg + pw, 1e-10)
+            hasPend  := true
+    est
+
+float raw = nlms(src, taps, mu, eps, power)
+
+// ── Trail volatilité (ratchet type Supertrend) ────────────────────────────
+float atrRaw = ta.atr(periodAtr)
+float atrUse = nonRepaint ? nz(atrRaw[1], atrRaw) : atrRaw   // ATR clôturé => trail gelé intrabar
+float band   = atrUse * factorAtr
+
+// clamp(prev, lower, upper) : équivalent aux 3 branches d'origine, sans branchement.
+var float trail = na
+float upper = raw + band
+float lower = raw - band
+trail := na(trail[1]) ? raw : math.min(upper, math.max(lower, trail[1]))
+
+// ── Direction : machine à états (1 signal par retournement) ───────────────
+float refClose = nonRepaint ? close[1] : close
+var int dir = 0
+int prevDir = dir
+
+bool turnUp   = trail > trail[1] and (not confirmFlip or refClose > trail)
+bool turnDown = trail < trail[1] and (not confirmFlip or refClose < trail)
+
+if turnUp
+    dir := 1
+else if turnDown
+    dir := -1
+
+bool goLong  = dir ==  1 and prevDir !=  1
+bool goShort = dir == -1 and prevDir != -1
+
+bool bull = dir ==  1
+bool bear = dir == -1
+color trendCol = bull ? longCol : bear ? shortCol : color.gray
+
+// ── Fills ─────────────────────────────────────────────────────────────────
+pTrail = plot(trail, "Trail Ref", display = display.none, editable = false)
+pPrice = plot(close, "Price Ref", display = display.none, editable = false)
+
+// Les bornes ne sont évaluées que si le fill est réellement affiché.
+bool fillBull = showFill and bull
+bool fillBear = showFill and bear
+
+fill(pPrice, pTrail, fillBull ? math.max(close, trail) : na, fillBull ? math.min(close, trail) : na,
+     fillBull ? cLongFade : na, fillBull ? cLongCore : na, title = "Bull Fill")
+fill(pPrice, pTrail, fillBear ? math.max(close, trail) : na, fillBear ? math.min(close, trail) : na,
+     fillBear ? cShortCore : na, fillBear ? cShortFade : na, title = "Bear Fill")
+
+// Glow — réutilise l'ATR déjà calculé (pas de 2e ta.atr) et n'émet rien si désactivé.
+float glow  = atrUse * 0.06
+color glowC = showGlow ? (bull ? cLongGlow : bear ? cShortGlow : cFlatGlow) : na
+pGlowUp = plot(showGlow ? trail - glow : na, "Glow Lower Ref", display = display.none, editable = false)
+pGlowDn = plot(showGlow ? trail + glow : na, "Glow Upper Ref", display = display.none, editable = false)
+fill(pTrail, pGlowUp, glowC, title = "Glow Lower")
+fill(pTrail, pGlowDn, glowC, title = "Glow Upper")
+
+// ── Bougies + trail ───────────────────────────────────────────────────────
+plotcandle(paintBar ? open  : na, paintBar ? high : na, paintBar ? low : na, paintBar ? close : na,
+           "Trend Candles", trendCol, trendCol, true, bordercolor = trendCol)
+plot(trail, "NLMS ATR", color = trendCol, linewidth = lineW)
+
+// ── Affichage LONG / SHORT ────────────────────────────────────────────────
+bool sigLong  = showSignals and goLong
+bool sigShort = showSignals and goShort
+bool shapeOn  = not showPriceLbl
+
+plotshape(sigLong  and shapeOn, "LONG",  shape.labelup,   location.belowbar,
+          cLongSolid,  text = "LONG",  textcolor = color.white, size = size.small)
+plotshape(sigShort and shapeOn, "SHORT", shape.labeldown, location.abovebar,
+          cShortSolid, text = "SHORT", textcolor = color.white, size = size.small)
+
+if showPriceLbl
+    if sigLong
+        label.new(bar_index, low, "LONG\n" + str.tostring(close, format.mintick), yloc = yloc.belowbar,
+                  color = longCol, textcolor = color.white, style = label.style_label_up, size = size.small)
+    if sigShort
+        label.new(bar_index, high, "SHORT\n" + str.tostring(close, format.mintick), yloc = yloc.abovebar,
+                  color = shortCol, textcolor = color.white, style = label.style_label_down, size = size.small)
+
+// ── Alerts ────────────────────────────────────────────────────────────────
+alertcondition(goLong,  "NLMS ATR Bullish", "NLMS ATR Trend turned bullish on {{ticker}}")
+alertcondition(goShort, "NLMS ATR Bearish", "NLMS ATR Trend turned bearish on {{ticker}}")
+
+if barstate.isconfirmed and (goLong or goShort)
+    alert((goLong ? "LONG " : "SHORT ") + syminfo.ticker + " @ " + str.tostring(close, format.mintick),
+          alert.freq_once_per_bar)
