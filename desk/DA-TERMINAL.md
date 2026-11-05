@@ -30,6 +30,7 @@ Le thème clair reste disponible (fond `#F3F3F3`, texte noir, mêmes bandeaux bl
 - Couleurs des sept espaces (`col:` dans la liste des mondes) ramenées à la palette terminal.
 - Graphiques en bougies : fond noir, texte gris, moyenne mobile cyan.
 - Studio : la coche « ✓ » n'est plus doublée sur les puces d'espaces.
+- Marque : plus d'image Captain Trading en haut à gauche. Le nom et le sous-titre s'affichent en texte (ambre, monospace) et le PNG intégré est retiré du fichier. Le favicon est conservé.
 
 ## Pour revenir en arrière ou ajuster
 
