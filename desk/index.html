@@ -2789,6 +2789,55 @@ kbd{font:600 11px var(--mono);box-shadow:inset 0 0 0 1px var(--line-2)}
 
 /* ---------- Mouvement réduit ---------- */
 @media (prefers-reduced-motion:reduce){.island .isl-norm::after{animation:none}}
+
+/* ---------- Cartes de news : badge, score, source, heure, symboles, réaction, titre, tags, alerte ---------- */
+.nc-l{--nx:#FFFFFF;--nm:#5CC8FF;--nc:#FFA028;--ne:#C9A0FF;--na:#1ED760;--ng:#FF7A5A;--nbr:#FF3B30;display:flex;flex-direction:column;gap:8px}
+:root[data-theme="light"] .nc-l{--nx:#000;--nm:#0B5FB8;--nc:#B06000;--ne:#6B3FBF;--na:#0B8F3A;--ng:#C2453B;--nbr:#D01F1F}
+.nc-day{margin:6px 0 0;padding-bottom:5px;border-bottom:1px solid var(--line);font:700 10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.nc{position:relative;display:flex;flex-direction:column;gap:8px;padding:10px 12px 9px 14px;text-decoration:none;color:var(--text);background:var(--solid);box-shadow:inset 0 0 0 1px var(--line),inset 3px 0 0 var(--c)}
+.nc.imp{background:color-mix(in oklab,var(--accent) 4%,var(--solid));box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--accent) 35%,var(--line)),inset 3px 0 0 var(--accent)}
+.nc.br{background:color-mix(in oklab,var(--nbr) 6%,var(--solid));box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--nbr) 50%,var(--line)),inset 3px 0 0 var(--nbr)}
+@media (hover:hover) and (pointer:fine){.nc:hover{background:var(--hover)}}
+.nc:focus-visible{outline:1px solid var(--accent);outline-offset:1px}
+.nc.in{animation:nrIn .3s cubic-bezier(.23,1,.32,1) both;animation-delay:var(--d,0ms)}
+.nc-h{display:flex;flex-wrap:wrap;align-items:center;gap:5px 9px;font:500 12px var(--mono);color:var(--muted)}
+.nc-b{flex:none;padding:2px 7px;font:700 10.5px var(--mono);font-style:normal;letter-spacing:.08em;text-transform:uppercase;color:var(--c);box-shadow:inset 0 0 0 1px var(--c)}
+.nc-b.imp,.nc.imp .nc-b{color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.nc.br .nc-b{color:var(--nbr);box-shadow:inset 0 0 0 1px var(--nbr)}
+.nc-sc{font:700 12px var(--mono);color:var(--accent)}
+.nc-h>b{font:600 12px var(--mono);color:var(--text)}
+.nc-at{color:var(--faint)}
+.nc-t,.nc-rc{font-style:normal;color:var(--muted)}
+.nc-t::before{content:"·";margin-right:9px;color:var(--faint)}
+.nc-rc{color:var(--faint)}
+.nc-read{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--bb-cyan)}
+.nc-r{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.nc-chip{padding:2px 7px;font:700 11px var(--mono);letter-spacing:.04em;color:var(--text);box-shadow:inset 0 0 0 1px var(--line-2)}
+.nc-rx{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;font:500 11px var(--mono);color:var(--muted);background:var(--bg);box-shadow:inset 0 0 0 1px var(--line-2)}
+.nc-rx i{display:inline-flex;width:12px;height:12px;color:var(--faint)}
+.nc-rx i svg{width:12px;height:12px}
+.nc-rx b{font-weight:700;color:var(--text)}
+.nc-rx em{font-style:normal;font-weight:700}
+.nc-rx.up em{color:var(--up)}.nc-rx.down em{color:var(--down)}
+.nc-go{color:var(--faint)}
+.nc-ti{margin:0;font:700 15px/1.4 var(--mono);letter-spacing:-.01em;color:var(--text);text-wrap:pretty;overflow-wrap:anywhere}
+.nc.br .nc-ti{color:#fff}
+:root[data-theme="light"] .nc.br .nc-ti{color:#000}
+.nc-m{display:flex;align-items:flex-start;gap:12px}
+.nc-m .nc-ti{flex:1;min-width:0}
+.nc-img{flex:none;display:block;width:112px;height:76px;overflow:hidden;box-shadow:inset 0 0 0 1px var(--line)}
+.nc-img img{display:block;width:100%;height:100%;object-fit:cover}
+.nc-f{display:flex;flex-wrap:wrap;align-items:center;gap:5px 8px;margin-top:1px;font:500 11.5px var(--mono);color:var(--muted)}
+.nc-bars{display:inline-flex;align-items:flex-end;gap:2px;height:11px;margin-right:2px}
+.nc-bars i{width:3px;background:var(--line-2)}
+.nc-bars i:nth-child(1){height:4px}.nc-bars i:nth-child(2){height:6px}.nc-bars i:nth-child(3){height:8px}.nc-bars i:nth-child(4){height:11px}
+.nc-bars.l1 i:nth-child(-n+1),.nc-bars.l2 i:nth-child(-n+2),.nc-bars.l3 i:nth-child(-n+3),.nc-bars.l4 i{background:var(--accent)}
+.nc-tag{padding:1px 7px;font:600 11px var(--mono);color:var(--muted);box-shadow:inset 0 0 0 1px var(--line-2)}
+.nc-al{margin-left:auto;color:var(--faint)}
+.nc-al.on{color:var(--muted)}
+.nc-al i{font-style:normal;font-weight:700;color:var(--up)}
+.nr-f{margin:0 0 8px}
+@media (max-width:600px){.nc{padding:9px 10px 8px 12px}.nc-r{margin-left:0;width:100%}.nc-ti{font-size:14px}.nc-read{display:none}.nc-img{width:72px;height:60px}}
 </style>
 <script>
 /* ================================================================
@@ -3322,6 +3371,10 @@ function tickNext(){
   host.innerHTML='<div class="lbl">Prochaine annonce '+(e.imp==="hi"?"à fort impact":"importante")+'</div><div class="ev">'+esc(e.fr)+' · '+parisTime(e.ts)+dayTxt+'</div><div class="cd">'+(ms>864e5?dur(ms):clock(ms))+'</div>';
 }
 
+/* ---------------- Bougies 1 min (5 h) : réaction du marché après chaque news ---------------- */
+S.k1m={};
+function loadK1m(){return Promise.all(["BTC","ETH","SOL","XAU"].map(function(b){return fetchJSON(OKX+"/api/v5/market/candles?instId="+inst(b)+"&bar=1m&limit=300").then(function(j){S.k1m[b]=(j.data||[]).slice().reverse().map(function(c){return {t:+c[0],o:+c[1],c:+c[4]};});}).catch(function(){});})).then(function(){renderNewsSoft();});}
+
 /* ---------------- News ---------------- */
 var HOT=/\b(fed|fomc|powell|cpi|ppi|pce|nfp|payrolls|jobs report|rate (cut|hike|decision)|tariff|trump|bitcoin|btc|crypto|ether|sec\b|etf|treasury|yields?|ecb|boj|china|opec|war|strike|missile|sanction)/i;
 var TR=lsj("tr")||{},trBusy=false,trDead=0;
@@ -3455,23 +3508,49 @@ function newsTout(){var seen={},L=[];
   return L.filter(function(x){if(!x||!x.title||!x.ts)return false;var k=x.title.slice(0,60).toLowerCase().replace(/[^a-z0-9]/g,"");if(seen[k])return false;seen[k]=1;return true;}).sort(function(a,b){return b.ts-a.ts;}).slice(0,70);}
 function initiales(n){var p=String(n||"?").replace(/[^A-Za-zÀ-ÿ0-9 ]/g,"").trim().split(/\s+/);return ((p[0]||"?")[0]+((p[1]||"")[0]||"")).toUpperCase();}
 function chrono(ts){var s=Math.max(0,Math.round((Date.now()-ts)/1000));return s<60?s+" s":s<3600?Math.floor(s/60)+" min":s<86400?Math.floor(s/3600)+" h":Math.floor(s/86400)+" j";}
-function newsRich(host,L,lang){
-  var premier=!NSEEN;NSEEN=NSEEN||{};var n=0;
-  var html=L.map(function(x){
-    var id=x.link+"|"+x.ts,neuf=!premier&&!NSEEN[id];NSEEN[id]=1;
-    var t=(lang==="fr"&&x.lang!=="fr"&&TR[x.title])?TR[x.title]:x.title;t=t.replace(/^(RUPTURE|DERNI[ÈE]RE MINUTE|DERNI[ÈE]RES? (HEURE|NOUVELLES?)|FLASH INFO|URGENT)\s*:/i,"BREAKING :");var br=/^[^A-Za-z]*(BREAKING|JUST IN|URGENT|FLASH)(?![A-Za-z])/i.test(x.title),C=NCAT[x.kind]||NCAT.tree;
-    var anim=neuf?' style="--d:'+Math.min(6,n++)*45+'ms"':'';
-    var sy=x.sym&&x.sym.length?'<span class="nr-sy">'+x.sym.map(function(c){return '<b>'+esc(c)+'</b>';}).join("")+'</span>':"";
-    if(x.kind==="x"){
-      var av=x.icon?'<img src="'+esc(x.icon)+'" alt="" loading="lazy" referrerpolicy="no-referrer">':'<span>'+esc(initiales(x.src))+'</span>';
-      return '<a class="nr tw'+(x.gros?"":" proj")+(x.img?" hasimg":"")+(neuf?" in":"")+(br?" br":"")+(x.vip?" vip":"")+'"'+anim+' href="'+esc(safeUrl(x.link))+'" target="_blank" rel="noopener noreferrer">'+
-        '<span class="nr-av">'+av+'</span><div class="nr-b"><div class="nr-who"><b>'+esc(x.src)+'</b>'+(x.via==="tg"?'<em class="nr-tgb">Telegram</em>':'<span>@'+esc(x.h)+'</span>')+(x.vip?'<em class="nr-vip">VIP</em>':'')+(x.truth?'<em class="nr-truth">Truth Social</em>':'')+(!x.gros?'<em class="nr-proj">Projet</em>':'')+'<i class="nr-t" data-ts="'+x.ts+'">'+chrono(x.ts)+'</i>'+(x.truth||x.via==="tg"?'':'<svg class="nr-x" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.8 3h3.1l-6.8 7.8 8 10.2h-6.3l-4.9-6.4-5.6 6.4H2.2l7.3-8.3L1.8 3h6.4l4.4 5.9L17.8 3Zm-1.1 16.2h1.7L7.4 4.7H5.6l11.1 14.5Z"/></svg>')+'</div>'+
-        '<p class="nr-tx">'+esc(t)+'</p>'+sy+'</div>'+(x.img?'<span class="nr-img"><img src="'+esc(x.img)+'" alt="" loading="lazy" referrerpolicy="no-referrer"></span>':'')+'</a>';
-    }
-    return '<a class="nr '+C[1]+(neuf?" in":"")+(br?" br":"")+'"'+anim+' href="'+esc(safeUrl(x.link))+'" target="_blank" rel="noopener noreferrer"><div class="nr-who"><em class="nr-cat">'+(br?"Breaking":C[0])+'</em><span>'+esc(x.src||"")+'</span><i class="nr-t" data-ts="'+x.ts+'">'+chrono(x.ts)+'</i></div><p class="nr-tx">'+esc(t)+'</p>'+sy+'</a>';
-  }).join("");
+/* ---------- Cartes de news ----------
+   Chaque news : [badge] [score] source · heure (reçue hh:mm) ▶ Lire | symboles cités | réaction du marché (15 min après)
+                 titre
+                 [barres] score  tags…                                           Alerte ✓ hh:mm / Reçue hh:mm
+   Le score (3 à 20) vient des mots-clés du titre, du caractère « breaking », du compte VIP et des symboles cités.
+   La réaction : variation de l'actif cité (sinon BTC) entre la minute de la news et 15 min plus tard, bougies OKX 1 min. */
+var NKEY=[[/\b(fed|fomc|powell)\b/i,"fed",5],[/\b(boj|bank of japan|banque du japon|takaichi|ueda)\b/i,"boj",4],[/\b(ecb|bce|lagarde)\b/i,"bce",4],
+  [/\b(cpi|pce|ppi|inflation)\b/i,"inflation",5],[/\b(nfp|payrolls?|jobs report|unemployment|ch[oô]mage|emploi|jobless|salaires?|wages?)\b/i,"emploi",4],
+  [/\b(rate (cut|hike|decision)|baisse des taux|hausse des taux|taux directeur|yields?|treasur(y|ies)|obligations?)\b/i,"taux",4],[/\b(tariffs?|droits de douane|trade (deal|war))\b/i,"tarifs",4],
+  [/\btrump\b/i,"trump",3],[/\b(bitcoin|btc)\b/i,"bitcoin",3],[/\b(ether|ethereum|eth)\b/i,"ethereum",2],[/\betfs?\b/i,"etf",3],[/\b(earnings|r[ée]sultats|guidance|revenue|chiffre d'affaires)\b/i,"earnings",2],
+  [/\b(oil|opec|p[ée]trole|brent|wti)\b/i,"pétrole",3],[/\b(china|chine|beijing|p[ée]kin|xi jinping)\b/i,"chine",3],[/\b(war|guerre|missile|strikes?|ceasefire|cessez-le-feu|iran|isra[eë]l|ukraine|russia|russie)\b/i,"géopolitique",4],
+  [/\b(sec|cftc)\b|r[ée]gulat/i,"régulation",3],[/\b(stablecoin|usdt|usdc|tether|circle)\b/i,"stablecoin",2],[/\b(hack(ed|er)?|exploit|drained|stolen|piratage)\b/i,"hack",5],[/\b(listing|will list|delist)\b/i,"listing",2],
+  [/\b(gold|l'or|xau|once)\b/i,"or",2],[/\b(nasdaq|s&p|dow|wall street|stocks?|bourse)\b/i,"actions",2],[/liquidat/i,"liquidations",3],[/\b(dollar|dxy|yen|euro|devises?)\b/i,"devises",2]];
+function nTags(x,t){var txt=(x.title||"")+" "+(t||""),out=[];NKEY.forEach(function(k){if(out.length<3&&k[0].test(txt))out.push(k);});return out;}
+function nScore(x,t,tags){var s=x.kind==="macro"||x.kind==="gov"?4:3;tags.forEach(function(k){s+=k[2];});if(x.br)s+=6;if(x.vip)s+=3;if(x.sym&&x.sym.length)s+=2;return Math.min(20,s);}
+function nDay(ts){var d=parisDay(new Date(ts)),today=parisDay(new Date()),hier=parisDay(new Date(Date.now()-864e5));return d===today?"Aujourd'hui":d===hier?"Hier":new Date(ts).toLocaleDateString("fr-FR",{timeZone:"Europe/Paris",weekday:"short",day:"numeric",month:"short"});}
+var ICO_CH='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.5h12M3 10l3-3 3 2 4-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function nReact(x){
+  var b=((x.sym||[]).map(norm).filter(function(s){return S.k1m[s];})[0])||"BTC",K=S.k1m[b];if(!K||K.length<2)return "";
+  var t0=Math.floor(x.ts/60000)*60000,i=-1;for(var n=0;n<K.length;n++){if(K[n].t===t0){i=n;break;}}if(i<0)return "";
+  var j=Math.min(K.length-1,i+15),mins=j-i;if(mins<1)return "";var p=(K[j].c/K[i].o-1)*100,up=p>=0;
+  return '<span class="nc-rx '+(up?"up":"down")+'" title="'+lab(b)+' : variation entre la minute de la news et '+mins+' min plus tard (OKX)"><i>'+ICO_CH+'</i><b>'+lab(b)+'</b>'+mins+' min<em>'+(up?"▲ +":"▼ −")+nf(Math.abs(p),2)+' %</em><span class="nc-go">→</span></span>';
+}
+function newsRich(host,L,lang,note){
+  var premier=!NSEEN;NSEEN=NSEEN||{};var n=0,now=Date.now(),cur="",html="";
+  L.forEach(function(x){
+    var id=x.link+"|"+x.ts,neuf=!premier&&!NSEEN[id];if(!NSEEN[id])NSEEN[id]=premier?x.ts:now;var rc=NSEEN[id];
+    var t=(lang==="fr"&&x.lang!=="fr"&&TR[x.title])?TR[x.title]:x.title;t=t.replace(/^(RUPTURE|DERNI[ÈE]RE MINUTE|DERNI[ÈE]RES? (HEURE|NOUVELLES?)|FLASH INFO|URGENT)\s*:/i,"BREAKING :");
+    var br=/^[^A-Za-z]*(BREAKING|JUST IN|URGENT|FLASH)(?![A-Za-z])/i.test(x.title),C=NCAT[x.kind]||NCAT.tree;x.br=br;
+    var tags=nTags(x,t),sc=nScore(x,t,tags),lvl=Math.min(4,Math.max(1,Math.ceil(sc/5))),imp=br||sc>=13;
+    var day=nDay(x.ts);if(day!==cur){cur=day;html+='<div class="nc-day">'+day+'</div>';}
+    var who=x.kind==="x"?'<b>'+esc(x.src)+'</b>'+(x.via==="tg"?'<em class="nr-tgb">Telegram</em>':x.h?'<span class="nc-at">@'+esc(x.h)+'</span>':'')+(x.vip?'<em class="nr-vip">VIP</em>':'')+(x.truth?'<em class="nr-truth">Truth Social</em>':'')+(!x.gros?'<em class="nr-proj">Projet</em>':''):'<b>'+esc(x.src||"")+'</b>';
+    var badge=br?'<em class="nc-b">Breaking</em>':imp?'<em class="nc-b imp">Important</em>':'<em class="nc-b">'+C[0]+'</em>';
+    var sy=(x.sym||[]).slice(0,4).map(function(c){return '<b class="nc-chip">'+esc(lab(norm(c)))+'</b>';}).join("");
+    var fl=S.flashed&&S.flashed[id];
+    html+='<a class="nc'+(imp?" imp":"")+(br?" br":"")+(neuf?" in":"")+'" style="--c:var(--'+C[1]+')'+(neuf?';--d:'+Math.min(6,n++)*45+'ms':'')+'" href="'+esc(safeUrl(x.link))+'" target="_blank" rel="noopener noreferrer">'+
+      '<div class="nc-h">'+badge+'<span class="nc-sc">'+sc+'</span>'+who+'<i class="nc-t">'+parisTime(x.ts)+'</i>'+(rc-x.ts>120000?'<i class="nc-rc">reçue '+parisTime(rc)+'</i>':'')+'<span class="nc-read">▶ Lire</span><span class="nc-r">'+sy+nReact(x)+'</span></div>'+
+      '<h3 class="nc-ti">'+esc(t)+'</h3>'+(x.img?'<span class="nc-img"><img src="'+esc(x.img)+'" alt="" loading="lazy" referrerpolicy="no-referrer"></span>':'')+
+      '<div class="nc-f"><span class="nc-bars l'+lvl+'" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="nc-sc">'+sc+'</span>'+tags.map(function(k){return '<b class="nc-tag">'+k[1]+'</b>';}).join("")+
+      '<span class="nc-al'+(fl?" on":"")+'">'+(fl?'Alerte <i>✓</i> '+parisTime(fl):'Reçue '+parisTime(rc))+'</span></div></a>';
+  });
   var fx=S.newsTab==="x"?'<div class="nr-f" role="group" aria-label="Filtrer les tweets">'+[["tous","Tous"],["onchain","Onchain"],["macro","Macro"],["news","News"],["trump","Trump"]].map(function(z){return '<button type="button" data-xf="'+z[0]+'" aria-pressed="'+((S.xFiltre||"tous")===z[0])+'">'+z[1]+'</button>';}).join("")+'</div>':'';
-  host.innerHTML=fx+'<div class="nr-l">'+(html||'<p class="nr-vide">Aucun tweet pour ce filtre dans les dernières heures.</p>')+'</div>';
+  host.innerHTML=(note||"")+fx+'<div class="nc-l">'+(html||'<p class="nr-vide">Aucune news pour ce filtre dans les dernières heures.</p>')+'</div>';
 }
 /* Les « il y a » des cartes avancent tout seuls */
 setInterval(function(){document.querySelectorAll(".nr-t[data-ts]").forEach(function(e){e.textContent=chrono(+e.getAttribute("data-ts"));});},10000);
@@ -3492,11 +3571,8 @@ function renderNews(){
   var lang=S.newsLang||C.newsLang||"fr";$("newsLang").textContent=lang==="fr"?"FR":"VO";$("newsLang").setAttribute("aria-pressed",lang==="fr"?"true":"false");
   var L=newsList().slice(0,tab==="x"?120:tab==="tout"?80:40);
   if(!L.length){host.innerHTML='<div class="empty">'+(tab==="macro"?(S.fjErr?"FinancialJuice ne répond pas pour le moment, nouvel essai dans quelques minutes.":"Connexion à FinancialJuice…"):(tab==="x"?"Connexion au fil des tweets…":"Chargement des news…"))+'</div>';return;}
-  if(tab==="tout"||tab==="x"){newsRich(host,L,lang);if(lang==="fr")translate(L);return;}
   var note=tab==="crypto"&&!S.news.wire.length&&S.news.crypto.length?'<div class="lq-note" style="margin-bottom:6px">Fil en direct indisponible : derniers articles en attendant.</div>':tab==="articles"&&S.cryptoErr?'<div class="lq-note" style="margin-bottom:6px">Articles crypto indisponibles pour le moment : headlines crypto de FinancialJuice en attendant.</div>':"";
-  host.innerHTML=note+L.map(function(x){var t=(lang==="fr"&&x.lang!=="fr"&&TR[x.title])?TR[x.title]:x.title;
-    var sy=x.sym&&x.sym.length?' · '+x.sym.map(function(c){return '<b class="nw-s">'+esc(c)+'</b>';}).join(""):"";
-    return '<a class="nw'+((x.sym?/^BREAKING/.test(x.title)||x.src==="Tree News":HOT.test(x.title))?" hot":"")+'" href="'+esc(safeUrl(x.link))+'" target="_blank" rel="noopener noreferrer"><div class="h">'+esc(t)+'</div><div class="m">'+esc(x.src)+' · '+ago(x.ts)+sy+'</div></a>';}).join("");
+  newsRich(host,L.map(function(x){return x.kind?x:Object.assign({kind:tab==="macro"?"macro":tab==="articles"?"art":"tree"},x);}),lang,note);
   if(lang==="fr")translate(L);
 }
 CK.renderNews=renderNews;
@@ -3582,6 +3658,7 @@ CK.boot=function(){
   setInterval(function(){Promise.all([loadBTCdaily(),loadFunding(),loadOI()]).then(computeFactors);},600000);
   setInterval(function(){loadFG().then(computeFactors);},1800000);
   setInterval(loadMovers,60000);
+  loadK1m();setInterval(loadK1m,90000);
   setInterval(loadCalendar,900000);
   (function fj(){setTimeout(function(){loadFJ().then(fj,fj);},document.hidden?180000:60000);})();
   document.addEventListener("visibilitychange",function(){if(!document.hidden&&Date.now()-FJ.ts>60000)loadFJ();});
@@ -4664,7 +4741,7 @@ CK.onWire=function(items){
   if(queue.length){if(CK.trNow)CK.trNow(queue);pump();}
 };
 function pump(){
-  if(showing||!queue.length)return;showing=true;var x=queue.shift();
+  if(showing||!queue.length)return;showing=true;var x=queue.shift();S.flashed=S.flashed||{};S.flashed[x.link+"|"+x.ts]=Date.now();
   if(!box){box=document.createElement("div");box.className="flash-wrap";box.setAttribute("aria-live","assertive");document.body.appendChild(box);}
   var fr=CK.trGet&&CK.trGet(x.title),c=document.createElement("a");c.className="flash";c.href=u.safeUrl(x.link);c.target="_blank";c.rel="noopener noreferrer";
   c.innerHTML='<span class="fl-k"><i></i>Flash · '+esc(x.fsrc||"FinancialJuice")+'<em>'+u.parisTime(x.ts||Date.now())+'</em></span><b>'+esc(fr||x.title)+'</b>'+(fr?'<span class="fl-o">'+esc(x.title)+'</span>':'')+'<button type="button" class="fl-x" aria-label="Fermer">×</button><span class="fl-t"></span>';

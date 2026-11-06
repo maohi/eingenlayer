@@ -58,3 +58,17 @@ la palette et les alertes : `GOLD`, `OR`, `XAUT`, `PAXG`.
 | Alertes et palette | « gold », « or » ou « xau » fonctionnent ; graphique TradingView `OKX:XAUUSDT.P`. |
 
 Hors périmètre, faute de données : options (Deribit ne cote pas l'or), top mouvements (réservé aux cryptos), corrélations (l'or y figurait déjà).
+
+## News en cartes
+
+Chaque news, dans tous les onglets (Tout, X, Macro, Crypto, Articles), est une carte groupée par jour
+(« Aujourd'hui », « Hier », puis la date) :
+
+| Zone | Contenu | D'où ça vient |
+|---|---|---|
+| En-tête | Badge **Important** (ambre), **Breaking** (rouge) ou la catégorie (X, Macro, Crypto, Exchange, Article, Gouv. US) ; score ; source ; heure de Paris ; « reçue hh:mm » si la news est arrivée plus de 2 min après sa publication ; « ▶ Lire ». | Score 3 à 20 : mots-clés du titre (Fed, BoJ, inflation, emploi, taux, tarifs, Trump, bitcoin, ETF, pétrole, Chine, géopolitique, hack…), +6 si breaking, +3 compte VIP, +2 si des symboles sont cités. Important à partir de 13. |
+| À droite | Symboles cités, puis la réaction du marché : « BTC 15 min ▲ +0,15 % → ». | Variation de l'actif cité (sinon BTC) entre la minute de la news et 15 min plus tard, sur les bougies 1 min OKX (fenêtre de 5 h, rechargée toutes les 90 s). Si la news a moins de 15 min, le délai réel est affiché. |
+| Corps | Titre (traduit en FR si l'option est active) ; vignette pour les tweets avec image. | |
+| Pied | Barres d'importance et score, jusqu'à trois tags, puis « Alerte ✓ hh:mm » si la news a déclenché un flash, sinon « Reçue hh:mm ». | |
+
+Pas de résumé sous le titre : les flux (FinancialJuice, X, dépêches, articles) ne fournissent que le titre, et le Desk n'invente pas de texte.
